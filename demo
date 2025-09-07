@@ -1,261 +1,287 @@
 from OpenGL.GL import *
 from OpenGL.GLUT import *
 from OpenGL.GLU import *
-import random, math, time
+import math, random, time
 
-# ----------------------
-# Window setup
-# ----------------------
-WIDTH, HEIGHT = 800, 800
+# =========================
+# Global State
+# =========================
+player_pos = [0.0, 0.0, 0.0]   # Astronaut position
+player_angle = 0.0             # Facing direction
 
-# ----------------------
-# Game State Variables
-# ----------------------
-player_x = 0
-player_z = 0  # Player moves in XZ plane
-tilt = 0
-score = 0
-oxygen = 100
-energy = 100
+PLAYER_SPEED = 5.0
 
-bullets = []  # [x, z]
-aliens = []   # [x, z]
-meteors = []  # [x, z]
+# Camera orbit variables
+camera_angle = 135.0
+camera_height = 200.0
+camera_radius = 100.0
+camera_pos = [camera_radius, 0.0, camera_height]
 
-last_alien_spawn = time.time()
-last_meteor_spawn = time.time()
+# Moon base variables
+BASE_RADIUS = 400
+NUM_CRATERS = 20
+craters = []
 
-# ----------------------
-# Drawing Functions
-# ----------------------
-def draw_text_2d(x, y, text):
+# Stars for 3D space sky
+star_positions = []
+blink_state = {}
+NUM_STARS = 400
+stars = []
+
+
+# =========================
+# STAR GENERATION & DRAWING
+# =========================
+def generate_stars(count=300):
+    """Generate stars in a full 3D spherical sky"""
+    global star_positions, blink_state
+    star_positions = []
+    blink_state = {}
+    for i in range(count):
+        theta = random.uniform(0, 2 * math.pi)
+        phi = random.uniform(0, math.pi)
+        r = random.uniform(1000, 1500)
+        x = r * math.cos(theta) * math.sin(phi)
+        y = r * math.sin(theta) * math.sin(phi)
+        z = r * math.cos(phi)
+        star_positions.append((x, y, z))
+        blink_state[i] = random.random()
+
+def draw_stars():
+    glPointSize(2)
+    glBegin(GL_POINTS)
+    for i, (x, y, z) in enumerate(star_positions):
+        brightness = 0.5 + 0.5 * math.sin(time.time() * 3 + i)
+        glColor3f(brightness, brightness, brightness)
+        glVertex3f(x, y, z)
+    glEnd()
+
+# =========================
+# MOON BASE & CRATERS
+# =========================
+def init_craters():
+    """Randomly generate crater positions"""
+    global craters
+    craters = []
+    for _ in range(NUM_CRATERS):
+        r = random.uniform(20, 50)
+        angle = random.uniform(0, 2*math.pi)
+        dist = random.uniform(50, BASE_RADIUS - r - 10)
+        x = dist * math.cos(angle)
+        y = dist * math.sin(angle)
+        craters.append((x, y, r))
+
+def init_stars():
+    """Generate random star positions across a wide 360° area"""
+    global stars
+    stars = []
+    for _ in range(NUM_STARS):
+        # Full spherical starfield placement
+        theta = random.uniform(0, 2 * math.pi)   # 360° horizontal
+        phi = random.uniform(-math.pi / 2, math.pi / 2)  # vertical angle
+
+        radius = random.uniform(1200, 2500)  # Place stars far enough away
+        x = radius * math.cos(phi) * math.cos(theta)
+        y = radius * math.cos(phi) * math.sin(theta)
+        z = radius * math.sin(phi)
+
+        stars.append((x, y, z))
+
+
+def draw_stars():
+    """Render blinking 3D stars as slightly bigger spheres with optional size variation"""
+    glPushMatrix()
+    for i, (x, y, z) in enumerate(stars):
+        # Increase radius: base 5-7 units for bigger stars
+        radius = 5.0 + (i % 3)  # Variation: 5,6,7
+
+        # Blink speed variation
+        blink_speed = 200.0 + (i % 3) * 50  # different stars blink differently
+
+        # Brightness for blinking
+        brightness = 0.6 + 0.4 * math.sin(glutGet(GLUT_ELAPSED_TIME) / blink_speed + i)
+        glColor3f(brightness, brightness, brightness)
+
+        glPushMatrix()
+        glTranslatef(x, y, z)
+        glutSolidSphere(radius, 8, 8)  # Bigger sphere radius
+        glPopMatrix()
+    glPopMatrix()
+
+
+
+
+
+
+def draw_moon():
+    """Draw a realistic 3D moon sphere with craters"""
+    glPushMatrix()
+    glColor3f(0.7, 0.7, 0.7)  # Light gray color
+    glutSolidSphere(BASE_RADIUS / 4, 60, 60)  # Draw moon as a sphere
+    glPopMatrix()
+
+
+
+
+    # Draw craters
+    for (cx, cy, r) in craters:
+        glColor3f(0.4, 0.4, 0.4)
+        glBegin(GL_TRIANGLE_FAN)
+        glVertex3f(cx, cy, -1)
+        for angle in range(0, 361, 10):
+            rad = math.radians(angle)
+            glVertex3f(cx + r * math.cos(rad), cy + r * math.sin(rad), -1)
+        glEnd()
+
+# =========================
+# DRAW PLAYER ASTRONAUT
+# =========================
+def draw_player():
+    glPushMatrix()
+    glTranslatef(player_pos[0], player_pos[1], player_pos[2] + 10)
+    glRotatef(player_angle, 0, 0, 1)
+
+    # Astronaut body
+    glColor3f(0.2, 0.6, 1.0)
+    glPushMatrix()
+    glScalef(10, 10, 20)
+    glutSolidCube(1.0)
+    glPopMatrix()
+
+    # Astronaut head
+    glColor3f(1.0, 0.9, 0.6)
+    glTranslatef(0, 0, 20)
+    glutSolidSphere(6, 20, 20)
+    glPopMatrix()
+
+# =========================
+# CAMERA SETUP
+# =========================
+def setupCamera():
+    glMatrixMode(GL_PROJECTION)
+    glLoadIdentity()
+    gluPerspective(70, 1.25, 0.1, 3000)
+    glMatrixMode(GL_MODELVIEW)
+    glLoadIdentity()
+
+    x = camera_radius * math.cos(math.radians(camera_angle))
+    y = camera_radius * math.sin(math.radians(camera_angle))
+    z = camera_height
+    gluLookAt(x, y, z, 0.0, 0.0, 0.0, 0, 0, 1)
+
+# =========================
+# HUD DISPLAY (SCORE, HEALTH)
+# =========================
+def draw_text(x, y, text, font=GLUT_BITMAP_HELVETICA_18):
+    glColor3f(1, 1, 1)
     glMatrixMode(GL_PROJECTION)
     glPushMatrix()
     glLoadIdentity()
-    gluOrtho2D(0, WIDTH, 0, HEIGHT)
+    gluOrtho2D(0, 1000, 0, 800)
     glMatrixMode(GL_MODELVIEW)
     glPushMatrix()
     glLoadIdentity()
-
-    glColor3f(1, 1, 1)
     glRasterPos2f(x, y)
     for ch in text:
-        glutBitmapCharacter(GLUT_BITMAP_HELVETICA_18, ord(ch))
-
+        glutBitmapCharacter(font, ord(ch))
     glPopMatrix()
     glMatrixMode(GL_PROJECTION)
     glPopMatrix()
     glMatrixMode(GL_MODELVIEW)
 
-def draw_bars():
-    global oxygen, energy
-    # Switch to 2D overlay
-    glMatrixMode(GL_PROJECTION)
-    glPushMatrix()
-    glLoadIdentity()
-    gluOrtho2D(0, WIDTH, 0, HEIGHT)
-    glMatrixMode(GL_MODELVIEW)
-    glPushMatrix()
-    glLoadIdentity()
+# =========================
+# CONTROLS
+# =========================
+def keyboardListener(key, x, y):
+    global player_pos, player_angle, camera_radius
+    if key == b'w':
+        nx = player_pos[0] + math.cos(math.radians(player_angle)) * PLAYER_SPEED
+        ny = player_pos[1] + math.sin(math.radians(player_angle)) * PLAYER_SPEED
+        if math.hypot(nx, ny) < BASE_RADIUS - 10:
+            player_pos[0], player_pos[1] = nx, ny
+    elif key == b's':
+        nx = player_pos[0] - math.cos(math.radians(player_angle)) * PLAYER_SPEED
+        ny = player_pos[1] - math.sin(math.radians(player_angle)) * PLAYER_SPEED
+        if math.hypot(nx, ny) < BASE_RADIUS - 10:
+            player_pos[0], player_pos[1] = nx, ny
+    elif key == b'a':
+        player_angle = (player_angle + 5) % 360
+    elif key == b'd':
+        player_angle = (player_angle - 5) % 360
+    elif key == b'z':  # Zoom in
+        camera_radius = max(50.0, camera_radius - 20.0)
+    elif key == b'x':  # Zoom out
+        camera_radius = min(1500.0, camera_radius + 20.0)
+    elif key == b'\x1b':  # ESC
+        glutLeaveMainLoop()
 
-    # Oxygen bar
-    glColor3f(0, 0, 1)
-    glBegin(GL_QUADS)
-    glVertex2f(20, HEIGHT-40)
-    glVertex2f(20 + oxygen*3, HEIGHT-40)
-    glVertex2f(20 + oxygen*3, HEIGHT-60)
-    glVertex2f(20, HEIGHT-60)
-    glEnd()
 
-    # Energy bar
-    glColor3f(1, 1, 0)
-    glBegin(GL_QUADS)
-    glVertex2f(20, HEIGHT-80)
-    glVertex2f(20 + energy*3, HEIGHT-80)
-    glVertex2f(20 + energy*3, HEIGHT-100)
-    glVertex2f(20, HEIGHT-100)
-    glEnd()
+def specialKeyListener(key, x, y):
+    global camera_angle, camera_height, camera_radius
+    
+    # Existing orbital controls
+    if key == GLUT_KEY_LEFT:
+        camera_angle = (camera_angle + 5.0) % 360.0
+    elif key == GLUT_KEY_RIGHT:
+        camera_angle = (camera_angle - 5.0) % 360.0
 
-    draw_text_2d(20, HEIGHT-120, f"Score: {score}")
+    # Angled Zoom Controls
+    elif key == GLUT_KEY_UP:
+        # Zoom in and lower the camera height
+        camera_radius = max(50.0, camera_radius - 20.0)
+        camera_height = max(50.0, camera_height - 5.0) # Adjust this value for zoom speed
+    elif key == GLUT_KEY_DOWN:
+        # Zoom out and raise the camera height
+        camera_radius = min(1500.0, camera_radius + 20.0)
+        camera_height = min(600.0, camera_height + 5.0) # Adjust this value for zoom speed
 
-    # Restore matrices
-    glPopMatrix()
-    glMatrixMode(GL_PROJECTION)
-    glPopMatrix()
-    glMatrixMode(GL_MODELVIEW)
+    # Update camera position based on new radius and height
+    x_pos = camera_radius * math.cos(math.radians(camera_angle))
+    y_pos = camera_radius * math.sin(math.radians(camera_angle))
+    z_pos = camera_height
 
-def draw_player():
-    global player_x, player_z
-    glPushMatrix()
-    glTranslatef(player_x, -100, player_z)
-    glColor3f(0, 0, 1)
-    glBegin(GL_TRIANGLES)
-    glVertex3f(0, 40, 0)
-    glVertex3f(-20, 0, 20)
-    glVertex3f(20, 0, 20)
+    gluLookAt(x_pos, y_pos, z_pos, 0.0, 0.0, 0.0, 0, 0, 1)
 
-    glVertex3f(0, 40, 0)
-    glVertex3f(20, 0, 20)
-    glVertex3f(20, 0, -20)
 
-    glVertex3f(0, 40, 0)
-    glVertex3f(20, 0, -20)
-    glVertex3f(-20, 0, -20)
-
-    glVertex3f(0, 40, 0)
-    glVertex3f(-20, 0, -20)
-    glVertex3f(-20, 0, 20)
-    glEnd()
-    glPopMatrix()
-
-def draw_bullets():
-    global bullets
-    glColor3f(1, 1, 0)
-    for b in bullets:
-        x, z = b
-        glPushMatrix()
-        glTranslatef(x, -60, z)
-        glutSolidCube(5)
-        glPopMatrix()
-
-def draw_aliens():
-    global aliens
-    glColor3f(0, 1, 0)
-    for a in aliens:
-        x, z = a
-        glPushMatrix()
-        glTranslatef(x, -60, z)
-        glutSolidCube(30)
-        glPopMatrix()
-
-def draw_meteors():
-    global meteors
-    glColor3f(0.5, 0.5, 0.5)
-    for m in meteors:
-        x, z = m
-        glPushMatrix()
-        glTranslatef(x, -60, z)
-        glutSolidSphere(15, 12, 12)
-        glPopMatrix()
-
-# ----------------------
-# Game Logic
-# ----------------------
-def spawn_alien():
-    global aliens
-    x = random.randint(-300, 300)
-    aliens.append([x, 400])
-
-def spawn_meteor():
-    global meteors
-    x = random.randint(-300, 300)
-    meteors.append([x, 450])
-
-def update(value):
-    global bullets, aliens, meteors, score, oxygen, energy
-    global last_alien_spawn, last_meteor_spawn
-
-    # Decrease oxygen/energy over time
-    oxygen = max(0, oxygen - 0.02)
-    energy = max(0, energy - 0.01)
-
-    # Move bullets
-    for b in bullets:
-        b[1] -= 15
-    bullets = [b for b in bullets if b[1] > -500]
-
-    # Move aliens
-    for a in aliens:
-        a[1] -= 5
-    aliens = [a for a in aliens if a[1] > -500]
-
-    # Move meteors
-    for m in meteors:
-        m[1] -= 7
-    meteors = [m for m in meteors if m[1] > -500]
-
-    # Bullet-Alien collision
-    for b in bullets[:]:
-        for a in aliens[:]:
-            if abs(b[0]-a[0]) < 20 and abs(b[1]-a[1]) < 20:
-                bullets.remove(b)
-                aliens.remove(a)
-                score += 10
-                break
-
-    # Spawn aliens every 2 sec
-    if time.time() - last_alien_spawn > 2:
-        spawn_alien()
-        last_alien_spawn = time.time()
-
-    # Spawn meteors every 5 sec
-    if time.time() - last_meteor_spawn > 5:
-        spawn_meteor()
-        last_meteor_spawn = time.time()
-
-    glutPostRedisplay()
-    glutTimerFunc(50, update, 0)
-
-# ----------------------
-# Display
-# ----------------------
-def display():
-    global score, oxygen, energy
+# =========================
+# MAIN DISPLAY FUNCTION
+# =========================
+def showScreen():
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
     glLoadIdentity()
+    glClearColor(0.0, 0.0, 0.05, 1.0)
 
-    # Camera
-    gluLookAt(0, 200, 500, 0, -100, 0, 0, 1, 0)
 
-    # Draw world
+    setupCamera()
+    draw_stars()
+    draw_moon()
     draw_player()
-    draw_bullets()
-    draw_aliens()
-    draw_meteors()
-
-    # HUD overlay
-    draw_bars()
+    draw_text(20, 760, "LUNARIS: The Last Outpost")
+    draw_text(20, 730, "Score: 0   Health: 100")
 
     glutSwapBuffers()
 
-# ----------------------
-# Controls
-# ----------------------
-def keyboardListener(key, x, y):
-    global bullets, player_x, player_z
-    if key == b' ':
-        bullets.append([player_x, player_z])
-    if key == b'a':
-        player_x -= 20
-    if key == b'd':
-        player_x += 20
-    if key == b'w':
-        player_z -= 20
-    if key == b's':
-        player_z += 20
-    if key == b'q':
-        glutLeaveMainLoop()
+def idle():
+    glutPostRedisplay()
 
-# ----------------------
-# Main
-# ----------------------
-def init():
-    glClearColor(0, 0, 0, 1)
-    glEnable(GL_DEPTH_TEST)
-    glMatrixMode(GL_PROJECTION)
-    glLoadIdentity()
-    gluPerspective(70, WIDTH/HEIGHT, 1, 1000)
-    glMatrixMode(GL_MODELVIEW)
-
-if __name__ == "__main__":
+# =========================
+# MAIN FUNCTION
+# =========================
+def main():
     glutInit()
     glutInitDisplayMode(GLUT_DOUBLE | GLUT_RGB | GLUT_DEPTH)
-    glutInitWindowSize(WIDTH, HEIGHT)
-    glutCreateWindow(b"LUNARIS: The Last Outpost - 3D")
-
-    init()
-
-    glutDisplayFunc(display)
+    glutInitWindowSize(1000, 800)
+    glutInitWindowPosition(50, 50)
+    glutCreateWindow(b"LUNARIS: The Last Outpost")
+    glEnable(GL_DEPTH_TEST)
+    generate_stars(300)
+    init_craters()
+    init_stars()
+    glutDisplayFunc(showScreen)
     glutKeyboardFunc(keyboardListener)
-    glutTimerFunc(50, update, 0)
+    glutSpecialFunc(specialKeyListener)
+    glutIdleFunc(idle)
     glutMainLoop()
+
+if __name__ == "__main__":
+    main()
