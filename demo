@@ -1,0 +1,261 @@
+from OpenGL.GL import *
+from OpenGL.GLUT import *
+from OpenGL.GLU import *
+import random, math, time
+
+# ----------------------
+# Window setup
+# ----------------------
+WIDTH, HEIGHT = 800, 800
+
+# ----------------------
+# Game State Variables
+# ----------------------
+player_x = 0
+player_z = 0  # Player moves in XZ plane
+tilt = 0
+score = 0
+oxygen = 100
+energy = 100
+
+bullets = []  # [x, z]
+aliens = []   # [x, z]
+meteors = []  # [x, z]
+
+last_alien_spawn = time.time()
+last_meteor_spawn = time.time()
+
+# ----------------------
+# Drawing Functions
+# ----------------------
+def draw_text_2d(x, y, text):
+    glMatrixMode(GL_PROJECTION)
+    glPushMatrix()
+    glLoadIdentity()
+    gluOrtho2D(0, WIDTH, 0, HEIGHT)
+    glMatrixMode(GL_MODELVIEW)
+    glPushMatrix()
+    glLoadIdentity()
+
+    glColor3f(1, 1, 1)
+    glRasterPos2f(x, y)
+    for ch in text:
+        glutBitmapCharacter(GLUT_BITMAP_HELVETICA_18, ord(ch))
+
+    glPopMatrix()
+    glMatrixMode(GL_PROJECTION)
+    glPopMatrix()
+    glMatrixMode(GL_MODELVIEW)
+
+def draw_bars():
+    global oxygen, energy
+    # Switch to 2D overlay
+    glMatrixMode(GL_PROJECTION)
+    glPushMatrix()
+    glLoadIdentity()
+    gluOrtho2D(0, WIDTH, 0, HEIGHT)
+    glMatrixMode(GL_MODELVIEW)
+    glPushMatrix()
+    glLoadIdentity()
+
+    # Oxygen bar
+    glColor3f(0, 0, 1)
+    glBegin(GL_QUADS)
+    glVertex2f(20, HEIGHT-40)
+    glVertex2f(20 + oxygen*3, HEIGHT-40)
+    glVertex2f(20 + oxygen*3, HEIGHT-60)
+    glVertex2f(20, HEIGHT-60)
+    glEnd()
+
+    # Energy bar
+    glColor3f(1, 1, 0)
+    glBegin(GL_QUADS)
+    glVertex2f(20, HEIGHT-80)
+    glVertex2f(20 + energy*3, HEIGHT-80)
+    glVertex2f(20 + energy*3, HEIGHT-100)
+    glVertex2f(20, HEIGHT-100)
+    glEnd()
+
+    draw_text_2d(20, HEIGHT-120, f"Score: {score}")
+
+    # Restore matrices
+    glPopMatrix()
+    glMatrixMode(GL_PROJECTION)
+    glPopMatrix()
+    glMatrixMode(GL_MODELVIEW)
+
+def draw_player():
+    global player_x, player_z
+    glPushMatrix()
+    glTranslatef(player_x, -100, player_z)
+    glColor3f(0, 0, 1)
+    glBegin(GL_TRIANGLES)
+    glVertex3f(0, 40, 0)
+    glVertex3f(-20, 0, 20)
+    glVertex3f(20, 0, 20)
+
+    glVertex3f(0, 40, 0)
+    glVertex3f(20, 0, 20)
+    glVertex3f(20, 0, -20)
+
+    glVertex3f(0, 40, 0)
+    glVertex3f(20, 0, -20)
+    glVertex3f(-20, 0, -20)
+
+    glVertex3f(0, 40, 0)
+    glVertex3f(-20, 0, -20)
+    glVertex3f(-20, 0, 20)
+    glEnd()
+    glPopMatrix()
+
+def draw_bullets():
+    global bullets
+    glColor3f(1, 1, 0)
+    for b in bullets:
+        x, z = b
+        glPushMatrix()
+        glTranslatef(x, -60, z)
+        glutSolidCube(5)
+        glPopMatrix()
+
+def draw_aliens():
+    global aliens
+    glColor3f(0, 1, 0)
+    for a in aliens:
+        x, z = a
+        glPushMatrix()
+        glTranslatef(x, -60, z)
+        glutSolidCube(30)
+        glPopMatrix()
+
+def draw_meteors():
+    global meteors
+    glColor3f(0.5, 0.5, 0.5)
+    for m in meteors:
+        x, z = m
+        glPushMatrix()
+        glTranslatef(x, -60, z)
+        glutSolidSphere(15, 12, 12)
+        glPopMatrix()
+
+# ----------------------
+# Game Logic
+# ----------------------
+def spawn_alien():
+    global aliens
+    x = random.randint(-300, 300)
+    aliens.append([x, 400])
+
+def spawn_meteor():
+    global meteors
+    x = random.randint(-300, 300)
+    meteors.append([x, 450])
+
+def update(value):
+    global bullets, aliens, meteors, score, oxygen, energy
+    global last_alien_spawn, last_meteor_spawn
+
+    # Decrease oxygen/energy over time
+    oxygen = max(0, oxygen - 0.02)
+    energy = max(0, energy - 0.01)
+
+    # Move bullets
+    for b in bullets:
+        b[1] -= 15
+    bullets = [b for b in bullets if b[1] > -500]
+
+    # Move aliens
+    for a in aliens:
+        a[1] -= 5
+    aliens = [a for a in aliens if a[1] > -500]
+
+    # Move meteors
+    for m in meteors:
+        m[1] -= 7
+    meteors = [m for m in meteors if m[1] > -500]
+
+    # Bullet-Alien collision
+    for b in bullets[:]:
+        for a in aliens[:]:
+            if abs(b[0]-a[0]) < 20 and abs(b[1]-a[1]) < 20:
+                bullets.remove(b)
+                aliens.remove(a)
+                score += 10
+                break
+
+    # Spawn aliens every 2 sec
+    if time.time() - last_alien_spawn > 2:
+        spawn_alien()
+        last_alien_spawn = time.time()
+
+    # Spawn meteors every 5 sec
+    if time.time() - last_meteor_spawn > 5:
+        spawn_meteor()
+        last_meteor_spawn = time.time()
+
+    glutPostRedisplay()
+    glutTimerFunc(50, update, 0)
+
+# ----------------------
+# Display
+# ----------------------
+def display():
+    global score, oxygen, energy
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
+    glLoadIdentity()
+
+    # Camera
+    gluLookAt(0, 200, 500, 0, -100, 0, 0, 1, 0)
+
+    # Draw world
+    draw_player()
+    draw_bullets()
+    draw_aliens()
+    draw_meteors()
+
+    # HUD overlay
+    draw_bars()
+
+    glutSwapBuffers()
+
+# ----------------------
+# Controls
+# ----------------------
+def keyboardListener(key, x, y):
+    global bullets, player_x, player_z
+    if key == b' ':
+        bullets.append([player_x, player_z])
+    if key == b'a':
+        player_x -= 20
+    if key == b'd':
+        player_x += 20
+    if key == b'w':
+        player_z -= 20
+    if key == b's':
+        player_z += 20
+    if key == b'q':
+        glutLeaveMainLoop()
+
+# ----------------------
+# Main
+# ----------------------
+def init():
+    glClearColor(0, 0, 0, 1)
+    glEnable(GL_DEPTH_TEST)
+    glMatrixMode(GL_PROJECTION)
+    glLoadIdentity()
+    gluPerspective(70, WIDTH/HEIGHT, 1, 1000)
+    glMatrixMode(GL_MODELVIEW)
+
+if __name__ == "__main__":
+    glutInit()
+    glutInitDisplayMode(GLUT_DOUBLE | GLUT_RGB | GLUT_DEPTH)
+    glutInitWindowSize(WIDTH, HEIGHT)
+    glutCreateWindow(b"LUNARIS: The Last Outpost - 3D")
+
+    init()
+
+    glutDisplayFunc(display)
+    glutKeyboardFunc(keyboardListener)
+    glutTimerFunc(50, update, 0)
+    glutMainLoop()
