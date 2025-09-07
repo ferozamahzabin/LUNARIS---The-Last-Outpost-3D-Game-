@@ -1,0 +1,170 @@
+from OpenGL.GL import *
+from OpenGL.GLUT import *
+from OpenGL.GLU import *
+import math, random
+
+# =========================
+# Global state
+# =========================
+player_pos = [0.0, 0.0, 0.0]   # On surface
+player_angle = 0.0             # Facing direction (rotation)
+
+PLAYER_SPEED = 5.0
+
+# Camera orbit
+camera_angle = 45.0
+camera_height = 120.0
+camera_radius = 300.0
+camera_pos = [camera_radius, 0.0, camera_height]
+
+# Moon base
+BASE_RADIUS = 400
+NUM_CRATERS = 20
+craters = []
+
+# =========================
+# Drawing
+# =========================
+def init_craters():
+    """Randomly generate crater positions and sizes inside the moon base"""
+    global craters
+    craters = []
+    for _ in range(NUM_CRATERS):
+        r = random.uniform(20, 50)   # radius of crater
+        angle = random.uniform(0, 2*math.pi)
+        dist = random.uniform(50, BASE_RADIUS - r - 10)
+        x = dist * math.cos(angle)
+        y = dist * math.sin(angle)
+        craters.append((x, y, r))
+
+def draw_moon_base():
+    """Draw the circular base"""
+    # Base disc
+    glColor3f(0.6, 0.6, 0.6)  # gray surface
+    glBegin(GL_TRIANGLE_FAN)
+    glVertex3f(0, 0, 0)
+    for angle in range(0, 361, 5):
+        rad = math.radians(angle)
+        glVertex3f(BASE_RADIUS * math.cos(rad),
+                   BASE_RADIUS * math.sin(rad), 0)
+    glEnd()
+
+    # Craters
+    for (cx, cy, r) in craters:
+        glColor3f(0.4, 0.4, 0.4)  # darker gray
+        glBegin(GL_TRIANGLE_FAN)
+        glVertex3f(cx, cy, -1)   # slightly lower for "indent"
+        for angle in range(0, 361, 10):
+            rad = math.radians(angle)
+            glVertex3f(cx + r * math.cos(rad),
+                       cy + r * math.sin(rad), -1)
+        glEnd()
+
+def draw_player():
+    """Simple cube + sphere astronaut"""
+    glPushMatrix()
+    glTranslatef(player_pos[0], player_pos[1], player_pos[2] + 10)
+    glRotatef(player_angle, 0, 0, 1)
+
+    # Body
+    glColor3f(0.2, 0.6, 1.0)
+    glPushMatrix()
+    glScalef(10, 10, 20)
+    glutSolidCube(1.0)
+    glPopMatrix()
+
+    # Head
+    glColor3f(1.0, 0.9, 0.6)
+    glTranslatef(0, 0, 20)
+    glutSolidSphere(6, 20, 20)
+    glPopMatrix()
+
+def setupCamera():
+    glMatrixMode(GL_PROJECTION)
+    glLoadIdentity()
+    gluPerspective(70, 1.25, 0.1, 2000)
+    glMatrixMode(GL_MODELVIEW)
+    glLoadIdentity()
+
+    # Orbit camera
+    x = camera_radius * math.cos(math.radians(camera_angle))
+    y = camera_radius * math.sin(math.radians(camera_angle))
+    z = camera_height
+    gluLookAt(x, y, z, 0.0, 0.0, 0.0, 0, 0, 1)
+
+# =========================
+# Controls
+# =========================
+def keyboardListener(key, x, y):
+    global player_pos, player_angle
+    if key == b'w':
+        nx = player_pos[0] + math.cos(math.radians(player_angle)) * PLAYER_SPEED
+        ny = player_pos[1] + math.sin(math.radians(player_angle)) * PLAYER_SPEED
+        if math.hypot(nx, ny) < BASE_RADIUS - 10:  # stay inside circle
+            player_pos[0], player_pos[1] = nx, ny
+    elif key == b's':
+        nx = player_pos[0] - math.cos(math.radians(player_angle)) * PLAYER_SPEED
+        ny = player_pos[1] - math.sin(math.radians(player_angle)) * PLAYER_SPEED
+        if math.hypot(nx, ny) < BASE_RADIUS - 10:
+            player_pos[0], player_pos[1] = nx, ny
+    elif key == b'a':
+        player_angle = (player_angle + 5) % 360
+    elif key == b'd':
+        player_angle = (player_angle - 5) % 360
+    elif key == b'\x1b':  # ESC
+        glutLeaveMainLoop()
+
+def specialKeyListener(key, x, y):
+    global camera_angle, camera_height, camera_pos
+    if key == GLUT_KEY_UP:
+        camera_height = min(600.0, camera_height + 10.0)
+    elif key == GLUT_KEY_DOWN:
+        camera_height = max(50.0, camera_height - 10.0)
+    elif key == GLUT_KEY_LEFT:
+        camera_angle = (camera_angle + 5.0) % 360.0
+    elif key == GLUT_KEY_RIGHT:
+        camera_angle = (camera_angle - 5.0) % 360.0
+
+    dist = camera_radius
+    camera_pos = [
+        dist * math.cos(math.radians(camera_angle)),
+        dist * math.sin(math.radians(camera_angle)),
+        camera_height
+    ]
+
+# =========================
+# Main loop
+# =========================
+def showScreen():
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
+    glLoadIdentity()
+
+    setupCamera()
+    draw_moon_base()
+    draw_player()
+
+    glutSwapBuffers()
+
+def idle():
+    glutPostRedisplay()
+
+def main():
+    glutInit()
+    glutInitDisplayMode(GLUT_DOUBLE | GLUT_RGB | GLUT_DEPTH)
+    glutInitWindowSize(1000, 800)
+    glutInitWindowPosition(50, 50)
+    glutCreateWindow(b"Moon Base with Craters")
+    glEnable(GL_DEPTH_TEST)
+    glClearColor(0.0, 0.0, 0.0, 1.0)
+
+    init_craters()
+
+    glutDisplayFunc(showScreen)
+    glutKeyboardFunc(keyboardListener)
+    glutSpecialFunc(specialKeyListener)
+    glutIdleFunc(idle)
+
+    glutMainLoop()
+
+if __name__ == "__main__":
+    main()
