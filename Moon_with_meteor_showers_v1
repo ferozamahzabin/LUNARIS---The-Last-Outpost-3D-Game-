@@ -1,0 +1,377 @@
+from OpenGL.GL import *
+from OpenGL.GLUT import *
+from OpenGL.GLU import *
+import math, random, time
+
+# =========================
+# Game State
+# =========================
+random.seed(423)
+
+energy = 100
+score = 0
+difficulty = 2        # 1: Easy, 2: Medium, 3: Hard
+umbrella_active = False
+game_over = False
+first_person_mode = False
+
+# =========================
+# Camera
+# =========================
+camera_angle  = 45.0
+camera_height = 150.0
+camera_radius = 520.0
+camera_pos    = [camera_radius, 0.0, camera_height]
+
+# =========================
+# Moon base
+# =========================
+BASE_RADIUS  = 520
+NUM_CRATERS  = 32
+craters = []
+
+# =========================
+# Player
+# =========================
+player_pos   = [0.0, 0.0, 20.0]
+gun_angle    = 0.0
+PLAYER_SPEED = 10.0
+
+HEAD_R = 21
+TORSO_W, TORSO_D, TORSO_H = 33.0, 21.0, 57.0
+SHOULDER_R = 7.5
+ARM_R, ARM_L = 6.0, 33.0
+LEG_R_TOP, LEG_R_BOT, LEG_L = 10.5, 6.75, 42.0
+GUN_BODY_L, GUN_BODY_W, GUN_BODY_H = 18.0, 8.0, 7.0
+GUN_BARREL_R, GUN_BARREL_L = 3.0, 15.0
+
+# =========================
+# Meteors
+# =========================
+meteors = []
+last_spawn_time = 0.0
+
+def meteor_params_for_difficulty(level):
+    if level == 1:
+        return (1.1, 3, 12.0, 6)
+    if level == 3:
+        return (0.25, 8, 22.0, 12)
+    return (0.6, 5, 17.0, 9)
+
+# =========================
+# HUD
+# =========================
+def draw_text(x, y, text, font=GLUT_BITMAP_HELVETICA_18, rgb=(1,1,1)):
+    glColor3f(*rgb)
+    glMatrixMode(GL_PROJECTION)
+    glPushMatrix()
+    glLoadIdentity()
+    gluOrtho2D(0, 1000, 0, 800)
+    glMatrixMode(GL_MODELVIEW)
+    glPushMatrix()
+    glLoadIdentity()
+    glRasterPos2f(x, y)
+    for ch in text:
+        glutBitmapCharacter(font, ord(ch))
+    glPopMatrix()
+    glMatrixMode(GL_PROJECTION)
+    glPopMatrix()
+    glMatrixMode(GL_MODELVIEW)
+
+def draw_health_bar():
+    # Background bar
+    glMatrixMode(GL_PROJECTION)
+    glPushMatrix(); glLoadIdentity(); gluOrtho2D(0, 1000, 0, 800)
+    glMatrixMode(GL_MODELVIEW)
+    glPushMatrix(); glLoadIdentity()
+    x, y, w, h = 20, 760, 400, 18
+    glColor3f(0.2, 0.2, 0.2)
+    glBegin(GL_QUADS)
+    glVertex2f(x-2, y-2); glVertex2f(x+w+2, y-2)
+    glVertex2f(x+w+2, y+h+2); glVertex2f(x-2, y+h+2)
+    glEnd()
+    pct = max(0, min(energy, 100)) / 100.0
+    glColor3f(0.2, 0.85, 0.3) if pct > .35 else glColor3f(0.85, 0.2, 0.2)
+    glBegin(GL_QUADS)
+    glVertex2f(x, y); glVertex2f(x + w*pct, y)
+    glVertex2f(x + w*pct, y+h); glVertex2f(x, y+h)
+    glEnd()
+    glPopMatrix(); glMatrixMode(GL_PROJECTION); glPopMatrix(); glMatrixMode(GL_MODELVIEW)
+    draw_text(20, 735, f"ENERGY: {energy:03d}   SCORE: {score:04d}   DIFFICULTY: {'EASY' if difficulty==1 else 'MEDIUM' if difficulty==2 else 'HARD'}")
+    if umbrella_active:
+        draw_text(840, 770, "☂ UMBRELLA", GLUT_BITMAP_HELVETICA_18, (0.9, 0.9, 0.2))
+
+# =========================
+# Geometry
+# =========================
+def init_craters():
+    craters.clear()
+    for _ in range(NUM_CRATERS):
+        r = random.uniform(28, 70)
+        ang = random.uniform(0, 2*math.pi)
+        dist = random.uniform(80, BASE_RADIUS - r - 20)
+        x = dist * math.cos(ang)
+        y = dist * math.sin(ang)
+        craters.append((x, y, r))
+
+def draw_moon_base():
+    glColor3f(0.68, 0.68, 0.7)
+    glBegin(GL_TRIANGLE_FAN)
+    glVertex3f(0, 0, 0)
+    for ang in range(0, 361, 4):
+        a = math.radians(ang)
+        glVertex3f(BASE_RADIUS*math.cos(a), BASE_RADIUS*math.sin(a), 0)
+    glEnd()
+    for (cx, cy, r) in craters:
+        glColor3f(0.28, 0.28, 0.33)
+        glBegin(GL_TRIANGLE_FAN)
+        for ang in range(0, 361, 5):
+            a = math.radians(ang)
+            glVertex3f(cx + r*math.cos(a), cy + r*math.sin(a), -0.5)
+        glEnd()
+        glColor3f(0.46, 0.46, 0.5)
+        glBegin(GL_TRIANGLE_FAN)
+        for ang in range(0, 361, 5):
+            a = math.radians(ang)
+            glVertex3f(cx + 0.62*r*math.cos(a), cy + 0.62*r*math.sin(a), -3.0)
+        glEnd()
+        glColor3f(0.78, 0.78, 0.82)
+        glBegin(GL_LINE_LOOP)
+        for ang in range(0, 361, 6):
+            a = math.radians(ang)
+            glVertex3f(cx + 0.7*r*math.cos(a), cy + 0.7*r*math.sin(a), 0.0)
+        glEnd()
+
+# =========================
+# Player + Umbrella
+# =========================
+def draw_player():
+    if first_person_mode and not game_over: return
+    glPushMatrix()
+    glTranslatef(player_pos[0], player_pos[1], 0.0)
+    glRotatef(gun_angle, 0, 0, 1)
+    # Torso
+    glColor3f(0.40, 0.65, 0.40)
+    glPushMatrix()
+    glTranslatef(0, 0, TORSO_H/2.0)
+    glScalef(TORSO_W, TORSO_D, TORSO_H)
+    glutSolidCube(1.0)
+    glPopMatrix()
+    # Head
+    glColor3f(0.05, 0.05, 0.05)
+    glPushMatrix()
+    glTranslatef(0, 0, TORSO_H + HEAD_R)
+    glutSolidSphere(HEAD_R, 24, 24)
+    glPopMatrix()
+    # Arms
+    glColor3f(0.90, 0.80, 0.70)
+    for side in (-1,1):
+        glPushMatrix()
+        glTranslatef(0, side*(TORSO_D/2.0 + SHOULDER_R*0.3), TORSO_H*0.74)
+        glutSolidSphere(SHOULDER_R, 12, 12)
+        glPopMatrix()
+        glPushMatrix()
+        glTranslatef(0, side*(TORSO_D/2.0 + 1.0), TORSO_H*0.74)
+        glRotatef(90, 0,1,0)
+        quad = gluNewQuadric()
+        gluCylinder(quad, ARM_R, ARM_R, ARM_L, 16, 1)
+        glPopMatrix()
+    # Legs
+    glColor3f(0.05, 0.05, 0.85)
+    for side in (-1,1):
+        glPushMatrix()
+        glTranslatef(side*(TORSO_W*0.22),0,0)
+        quad = gluNewQuadric()
+        gluCylinder(quad, LEG_R_TOP, LEG_R_BOT, LEG_L, 16, 1)
+        glPopMatrix()
+    # Gun
+    glPushMatrix()
+    glTranslatef(TORSO_W*0.6, 0, TORSO_H*0.72)
+    glColor3f(0.22, 0.22, 0.22)
+    glPushMatrix()
+    glTranslatef(GUN_BODY_L*0.5, 0,0)
+    glScalef(GUN_BODY_L, GUN_BODY_W, GUN_BODY_H)
+    glutSolidCube(1.0)
+    glPopMatrix()
+    glColor3f(0.85,0,0)
+    glRotatef(90,0,1,0)
+    quad = gluNewQuadric()
+    gluCylinder(quad,GUN_BARREL_R,GUN_BARREL_R,GUN_BARREL_L,20,1)
+    glPopMatrix()
+    glPopMatrix()
+
+def midpoint_circle(radius, cx, cy, cz):
+    x = 0
+    y = radius
+    d = 1 - radius
+    glBegin(GL_POINTS)
+    while x <= y:
+        glVertex3f(cx + x, cy + y, cz)
+        glVertex3f(cx - x, cy + y, cz)
+        glVertex3f(cx + y, cy + x, cz)
+        glVertex3f(cx - y, cy + x, cz)
+        if d < 0: d += 2*x + 3
+        else: d += 2*(x - y)+5; y -= 1
+        x += 1
+    glEnd()
+
+def draw_umbrella():
+    if not umbrella_active: return
+    px, py, pz = player_pos
+    glColor3f(1, 0, 1)
+    midpoint_circle(30, px, py, TORSO_H + HEAD_R*2.2)
+    glBegin(GL_LINES)
+    glVertex3f(px, py, TORSO_H + HEAD_R*2.2)
+    glVertex3f(px, py, TORSO_H + HEAD_R*0.2)
+    glEnd()
+
+# =========================
+# Meteors
+# =========================
+def spawn_meteor_wave():
+    interval, count, speed, _ = meteor_params_for_difficulty(difficulty)
+    for _ in range(count):
+        ang = random.uniform(0, 2*math.pi)
+        dist = random.uniform(20, BASE_RADIUS-20)
+        x = dist * math.cos(ang)
+        y = dist * math.sin(ang)
+        z = random.uniform(500, 800)
+        vx = random.uniform(-3,3)
+        vy = random.uniform(-3,3)
+        vz = -speed - random.uniform(0,5)
+        r = random.uniform(6,12)
+        meteors.append({"x":x,"y":y,"z":z,"vx":vx,"vy":vy,"vz":vz,"r":r})
+
+def update_meteors():
+    global meteors, energy, score, game_over
+    _, _, _, damage = meteor_params_for_difficulty(difficulty)
+    kept = []
+    px, py, pz = player_pos
+    for m in meteors:
+        m["x"] += m["vx"]
+        m["y"] += m["vy"]
+        m["z"] += m["vz"]
+        if m["z"] < -10: continue
+        dx, dy = m["x"]-px, m["y"]-py
+        dist = math.hypot(dx, dy)
+        umbrella_top = TORSO_H + HEAD_R*2.2 + 1
+        if m["z"] <= umbrella_top + m["r"] and dist <= 30 + m["r"]:
+            score += 2
+            continue  # destroyed by umbrella
+        if m["z"] <= 25 and dist <= m["r"]+18:
+            if not umbrella_active:
+                energy -= damage
+                if energy <= 0:
+                    energy = 0
+                    game_over = True
+            continue
+        kept.append(m)
+    meteors = kept
+
+def draw_meteors():
+    glColor3f(1.0,0.6,0.1)
+    for m in meteors:
+        glPushMatrix()
+        glTranslatef(m["x"], m["y"], m["z"])
+        glutSolidSphere(m["r"], 12,12)
+        glPopMatrix()
+
+# =========================
+# Controls
+# =========================
+def keyboardListener(key,x,y):
+    global gun_angle, player_pos, umbrella_active, difficulty
+    if game_over and key != b'\x1b': return
+    if key == b's':
+        nx = player_pos[0] + math.cos(math.radians(gun_angle))*PLAYER_SPEED
+        ny = player_pos[1] + math.sin(math.radians(gun_angle))*PLAYER_SPEED
+        if math.hypot(nx,ny) <= BASE_RADIUS-18: player_pos[0],player_pos[1]=nx,ny
+    elif key==b'w':
+        nx = player_pos[0] - math.cos(math.radians(gun_angle))*PLAYER_SPEED
+        ny = player_pos[1] - math.sin(math.radians(gun_angle))*PLAYER_SPEED
+        if math.hypot(nx,ny)<= BASE_RADIUS-18: player_pos[0],player_pos[1]=nx,ny
+    elif key==b'a': gun_angle=(gun_angle+6)%360
+    elif key==b'd': gun_angle=(gun_angle-6)%360
+    elif key==b'u': umbrella_active = not umbrella_active
+    elif key in (b'1',b'2',b'3'): difficulty=int(key.decode('ascii'))
+    elif key==b'\r' and game_over: restart()
+    elif key==b'\x1b': glutLeaveMainLoop()
+
+def specialKeyListener(key,x,y):
+    global camera_angle, camera_height, camera_pos
+    if key==GLUT_KEY_UP: camera_height=min(900,camera_height+20)
+    elif key==GLUT_KEY_DOWN: camera_height=max(120,camera_height-20)
+    elif key==GLUT_KEY_LEFT: camera_angle=(camera_angle+4)%360
+    elif key==GLUT_KEY_RIGHT: camera_angle=(camera_angle-4)%360
+    dist = camera_radius
+    camera_pos = [dist*math.cos(math.radians(camera_angle)),
+                  dist*math.sin(math.radians(camera_angle)),
+                  camera_height]
+
+# =========================
+# Camera
+# =========================
+def setupCamera():
+    glMatrixMode(GL_PROJECTION)
+    glLoadIdentity()
+    gluPerspective(110, 1.25, 0.1, 4000)
+    glMatrixMode(GL_MODELVIEW)
+    glLoadIdentity()
+    x, y, z = camera_pos
+    gluLookAt(x, y, z, 0.0, 0.0, 0.0, 0, 0, 1)
+
+def draw_game_over():
+    draw_text(400,420,"GAME OVER - You Died!", GLUT_BITMAP_HELVETICA_18,(1,0.3,0.3))
+    glPushMatrix()
+    glColor3f(1,1,1)
+    px, py, pz = player_pos
+    glTranslatef(px, py, 5)
+    glRotatef(90,0,1,0)
+    glutSolidCube(20)
+    glPopMatrix()
+
+def showScreen():
+    glClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT)
+    glLoadIdentity()
+    setupCamera()
+    draw_moon_base()
+    draw_player()
+    draw_meteors()
+    draw_umbrella()
+    draw_health_bar()
+    if game_over: draw_game_over()
+    glutSwapBuffers()
+
+def idle():
+    global last_spawn_time
+    if game_over: glutPostRedisplay(); return
+    interval,_,_,_ = meteor_params_for_difficulty(difficulty)
+    now = time.time()
+    if now - last_spawn_time >= interval:
+        spawn_meteor_wave(); last_spawn_time = now
+    update_meteors()
+    glutPostRedisplay()
+
+def restart():
+    global energy, score, game_over, meteors, player_pos, gun_angle
+    energy = 100; score = 0; game_over=False
+    meteors=[]; player_pos=[0.0,0.0,20.0]; gun_angle=0.0
+    init_craters()
+
+def main():
+    glutInit()
+    glutInitDisplayMode(GLUT_DOUBLE|GLUT_RGB|GLUT_DEPTH)
+    glutInitWindowSize(1000,800)
+    glutInitWindowPosition(40,40)
+    glutCreateWindow(b"LUNARIS: The Last Outpost - Meteor Storm")
+    glEnable(GL_DEPTH_TEST)
+    glClearColor(0.02,0.02,0.04,1.0)
+    init_craters()
+    glutDisplayFunc(showScreen)
+    glutKeyboardFunc(keyboardListener)
+    glutSpecialFunc(specialKeyListener)
+    glutIdleFunc(idle)
+    glutMainLoop()
+
+if __name__=="__main__":
+    main()
