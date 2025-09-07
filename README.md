@@ -1,4 +1,4 @@
-##🌑 LUNARIS: The Last Outpost
+🌑 LUNARIS: The Last Outpost
 
 The year is 3025. You are an astronaut stranded on the hostile moon Erevos after a mission goes wrong. Beneath its icy surface, alien species awaken and launch relentless attacks. With oxygen running out, a failing outpost, and scarce resources, survival becomes the ultimate challenge.
 
@@ -6,7 +6,7 @@ The environment itself is unforgiving: meteor storms strike without warning, ene
 
 LUNARIS: The Last Outpost is built entirely with OpenGL for a computer graphics project. It combines survival mechanics, basic combat, and environmental hazards into a visually immersive lunar experience. The core challenge: can you outlast the invasion while uncovering the secrets of past missions?
 
-##🎮 Features
+🎮 Features
 
 Oxygen and energy bar that decrease over time
 
