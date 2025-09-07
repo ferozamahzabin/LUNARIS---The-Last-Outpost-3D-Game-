@@ -6,19 +6,19 @@ import math, random, time
 # =========================
 # Global State
 # =========================
-player_pos = [0.0, 0.0, 0.0]   # Astronaut position
-player_angle = 0.0             # Facing direction
+BASE_RADIUS = 1500 # A larger value for a bigger moon
+player_pos = [0.0, 0.0, BASE_RADIUS / 4] # Set initial Z-position to moon radius
+player_angle = 0.0 # Facing direction
 
 PLAYER_SPEED = 5.0
 
 # Camera orbit variables
-camera_angle = 135.0
+camera_angle = 45.0
 camera_height = 200.0
-camera_radius = 100.0
+camera_radius = 600.0
 camera_pos = [camera_radius, 0.0, camera_height]
 
 # Moon base variables
-BASE_RADIUS = 400
 NUM_CRATERS = 20
 craters = []
 
@@ -77,8 +77,8 @@ def init_stars():
     stars = []
     for _ in range(NUM_STARS):
         # Full spherical starfield placement
-        theta = random.uniform(0, 2 * math.pi)   # 360° horizontal
-        phi = random.uniform(-math.pi / 2, math.pi / 2)  # vertical angle
+        theta = random.uniform(0, 2 * math.pi)  # 360° horizontal
+        phi = random.uniform(-math.pi / 2, math.pi / 2) # vertical angle
 
         radius = random.uniform(1200, 2500)  # Place stars far enough away
         x = radius * math.cos(phi) * math.cos(theta)
@@ -96,7 +96,7 @@ def draw_stars():
         radius = 5.0 + (i % 3)  # Variation: 5,6,7
 
         # Blink speed variation
-        blink_speed = 200.0 + (i % 3) * 50  # different stars blink differently
+        blink_speed = 200.0 + (i % 3) * 50 # different stars blink differently
 
         # Brightness for blinking
         brightness = 0.6 + 0.4 * math.sin(glutGet(GLUT_ELAPSED_TIME) / blink_speed + i)
@@ -117,7 +117,7 @@ def draw_moon():
     """Draw a realistic 3D moon sphere with craters"""
     glPushMatrix()
     glColor3f(0.7, 0.7, 0.7)  # Light gray color
-    glutSolidSphere(BASE_RADIUS / 4, 60, 60)  # Draw moon as a sphere
+    glutSolidSphere(BASE_RADIUS / 4, 60, 60) # Draw moon as a sphere
     glPopMatrix()
 
 
@@ -137,21 +137,59 @@ def draw_moon():
 # DRAW PLAYER ASTRONAUT
 # =========================
 def draw_player():
+    global player_pos, player_angle
+    
     glPushMatrix()
-    glTranslatef(player_pos[0], player_pos[1], player_pos[2] + 10)
+    # Move the entire player to the current position
+    glTranslatef(player_pos[0], player_pos[1], player_pos[2] + 15)
+    # Rotate the player based on their facing direction
     glRotatef(player_angle, 0, 0, 1)
 
-    # Astronaut body
-    glColor3f(0.2, 0.6, 1.0)
+    # Main Body (Torso)
+    glColor3f(1.0, 1.0, 1.0) # White suit
     glPushMatrix()
-    glScalef(10, 10, 20)
+    glScalef(15, 12, 25) # Use different scales to make it a rectangular body
+    glutSolidCube(1.0)
+    glPopMatrix()
+    
+    # Helmet (Head)
+    glColor3f(1.0, 0.9, 0.6) # Off-white helmet
+    glPushMatrix()
+    glTranslatef(0, 0, 15) # Position the helmet on top of the body
+    glutSolidSphere(8, 20, 20)
+    glPopMatrix()
+
+    # Right Arm
+    glColor3f(1.0, 1.0, 1.0) # White suit
+    glPushMatrix()
+    glTranslatef(10, 0, 5) # Position relative to body
+    glRotatef(-45, 1, 0, 0) # Angle the arm slightly
+    glScalef(5, 5, 15)
     glutSolidCube(1.0)
     glPopMatrix()
 
-    # Astronaut head
-    glColor3f(1.0, 0.9, 0.6)
-    glTranslatef(0, 0, 20)
-    glutSolidSphere(6, 20, 20)
+    # Left Arm
+    glPushMatrix()
+    glTranslatef(-10, 0, 5) # Symmetrical position for the other arm
+    glRotatef(-45, 1, 0, 0)
+    glScalef(5, 5, 15)
+    glutSolidCube(1.0)
+    glPopMatrix()
+
+    # Right Leg
+    glPushMatrix()
+    glTranslatef(5, 0, -15) # Position below the body
+    glScalef(6, 6, 18)
+    glutSolidCube(1.0)
+    glPopMatrix()
+
+    # Left Leg
+    glPushMatrix()
+    glTranslatef(-5, 0, -15)
+    glScalef(6, 6, 18)
+    glutSolidCube(1.0)
+    glPopMatrix()
+
     glPopMatrix()
 
 # =========================
@@ -164,10 +202,16 @@ def setupCamera():
     glMatrixMode(GL_MODELVIEW)
     glLoadIdentity()
 
+    # Camera's eye position based on player's position
     x = camera_radius * math.cos(math.radians(camera_angle))
     y = camera_radius * math.sin(math.radians(camera_angle))
     z = camera_height
-    gluLookAt(x, y, z, 0.0, 0.0, 0.0, 0, 0, 1)
+
+    camera_x = player_pos[0] + x
+    camera_y = player_pos[1] + y
+    camera_z = player_pos[2] + z
+
+    gluLookAt(camera_x, camera_y, camera_z, player_pos[0], player_pos[1], player_pos[2] + 15, 0, 0, 1)
 
 # =========================
 # HUD DISPLAY (SCORE, HEALTH)
@@ -193,55 +237,39 @@ def draw_text(x, y, text, font=GLUT_BITMAP_HELVETICA_18):
 # CONTROLS
 # =========================
 def keyboardListener(key, x, y):
-    global player_pos, player_angle, camera_radius
+    global player_pos, player_angle
     if key == b'w':
         nx = player_pos[0] + math.cos(math.radians(player_angle)) * PLAYER_SPEED
         ny = player_pos[1] + math.sin(math.radians(player_angle)) * PLAYER_SPEED
-        if math.hypot(nx, ny) < BASE_RADIUS - 10:
+        # Do not allow player to go off the moon's surface
+        if math.hypot(nx, ny) < (BASE_RADIUS / 4) - 10:
             player_pos[0], player_pos[1] = nx, ny
     elif key == b's':
         nx = player_pos[0] - math.cos(math.radians(player_angle)) * PLAYER_SPEED
         ny = player_pos[1] - math.sin(math.radians(player_angle)) * PLAYER_SPEED
-        if math.hypot(nx, ny) < BASE_RADIUS - 10:
+        if math.hypot(nx, ny) < (BASE_RADIUS / 4) - 10:
             player_pos[0], player_pos[1] = nx, ny
     elif key == b'a':
         player_angle = (player_angle + 5) % 360
     elif key == b'd':
         player_angle = (player_angle - 5) % 360
-    elif key == b'z':  # Zoom in
-        camera_radius = max(50.0, camera_radius - 20.0)
-    elif key == b'x':  # Zoom out
-        camera_radius = min(1500.0, camera_radius + 20.0)
     elif key == b'\x1b':  # ESC
         glutLeaveMainLoop()
 
-
 def specialKeyListener(key, x, y):
     global camera_angle, camera_height, camera_radius
-    
-    # Existing orbital controls
-    if key == GLUT_KEY_LEFT:
-        camera_angle = (camera_angle + 5.0) % 360.0
-    elif key == GLUT_KEY_RIGHT:
-        camera_angle = (camera_angle - 5.0) % 360.0
-
-    # Angled Zoom Controls
-    elif key == GLUT_KEY_UP:
+    if key == GLUT_KEY_UP:
         # Zoom in and lower the camera height
         camera_radius = max(50.0, camera_radius - 20.0)
-        camera_height = max(50.0, camera_height - 5.0) # Adjust this value for zoom speed
+        camera_height = max(25.0, camera_height - 5.0) 
     elif key == GLUT_KEY_DOWN:
         # Zoom out and raise the camera height
         camera_radius = min(1500.0, camera_radius + 20.0)
-        camera_height = min(600.0, camera_height + 5.0) # Adjust this value for zoom speed
-
-    # Update camera position based on new radius and height
-    x_pos = camera_radius * math.cos(math.radians(camera_angle))
-    y_pos = camera_radius * math.sin(math.radians(camera_angle))
-    z_pos = camera_height
-
-    gluLookAt(x_pos, y_pos, z_pos, 0.0, 0.0, 0.0, 0, 0, 1)
-
+        camera_height = min(600.0, camera_height + 5.0)
+    elif key == GLUT_KEY_LEFT:
+        camera_angle = (camera_angle + 5.0) % 360.0
+    elif key == GLUT_KEY_RIGHT:
+        camera_angle = (camera_angle - 5.0) % 360.0
 
 # =========================
 # MAIN DISPLAY FUNCTION
