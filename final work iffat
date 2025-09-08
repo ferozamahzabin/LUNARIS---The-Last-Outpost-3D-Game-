@@ -1,0 +1,782 @@
+from OpenGL.GL import *
+from OpenGL.GLUT import *
+from OpenGL.GLU import *
+import math, random, time
+
+# =========================
+# Global State
+# =========================
+BASE_RADIUS = 1500  # A larger value for a bigger moon
+player_pos = [0.0, 0.0, BASE_RADIUS / 4 + 4]
+player_angle = 0.0  # Facing direction
+gun_rotation_speed = 240.0 # Degrees per second for 360-degree rotation
+
+PLAYER_SPEED = 5.0
+
+# Camera orbit variables
+camera_angle = 45.0
+camera_height = 200.0
+camera_radius = 600.0
+camera_pos = [camera_radius, 0.0, camera_height]
+
+# Moon base variables
+NUM_CRATERS = 20
+craters = []
+
+# Stars for 3D space sky
+star_positions = []
+blink_state = {}
+NUM_STARS = 400
+stars = []
+
+# Alien Variables
+aliens = []
+MAX_ALIENS = 2  # Spawns aliens in pairs
+total_aliens_to_spawn = 10  # Max number of aliens to spawn in total
+aliens_spawned_count = 0  # Counter for spawned aliens
+ALIEN_SPAWN_INTERVAL = 5.0  # Seconds between potential alien spawns
+last_alien_spawn_time = time.time()
+INITIAL_ALIEN_SPEED = 10.0
+ALIEN_SPEED_INCREASE_RATE = 0.5  # Speed increases by this much for each new alien
+ALIEN_SPAWN_HEIGHT = 1000  # How high above the moon surface aliens spawn
+ALIEN_SPAWN_RADIUS_OFFSET = 500  # Max horizontal distance from player to spawn
+ALIEN_COLLISION_RADIUS = 15.0 # Radius for collision with player
+
+# Game State Variables
+is_paused = False
+game_over = False
+score = 0
+health = 100 # Increased starting health for more balanced gameplay
+oxygen = 100.0  # New oxygen variable
+OXYGEN_DECAY_RATE = 0.5 # Oxygen decreases by 0.5 units per second
+
+# Bullets
+bullets = []
+BULLET_SPEED = 100.0  # Make bullets faster
+BULLET_LIFETIME = 3.0  # Shorter lifetime for faster bullets
+BULLET_RADIUS = 1.0  # Smaller bullet size
+is_firing = False  # Start with continuous firing
+last_shot_time = time.time()  # For continuous firing cooldown
+BULLET_COOLDOWN = 0.1  # Faster firing rate for continuous fire
+
+# Coin Variables
+coins = []
+MAX_COINS = 5
+COIN_SPAWN_INTERVAL = 10.0 # Seconds between potential coin spawns
+last_coin_spawn_time = time.time()
+COIN_HEALTH_RESTORE = 20
+COIN_OXYGEN_RESTORE = 20
+collected_coins = 0 # New variable to track collected coins
+collision_message = ""
+message_display_time = 0
+
+# Shield Variables
+is_shielded = False
+shield_duration = 10.0 # Duration in seconds
+shield_start_time = 0.0
+
+# For idle() function to track elapsed time
+last_tick = time.time()
+
+# =========================
+# STAR GENERATION & DRAWING
+# =========================
+def generate_stars(count=300):
+    """Generate stars in a full 3D spherical sky"""
+    global star_positions, blink_state
+    star_positions = []
+    blink_state = {}
+    for i in range(count):
+        theta = random.uniform(0, 2 * math.pi)
+        phi = random.uniform(0, math.pi)
+        r = random.uniform(1000, 1500)
+        x = r * math.cos(theta) * math.sin(phi)
+        y = r * math.sin(theta) * math.sin(phi)
+        z = r * math.cos(phi)
+        star_positions.append((x, y, z))
+        blink_state[i] = random.random()
+
+def draw_stars():
+    glPointSize(2)
+    glBegin(GL_POINTS)
+    for i, (x, y, z) in enumerate(star_positions):
+        brightness = 0.5 + 0.5 * math.sin(time.time() * 3 + i)
+        glColor3f(brightness, brightness, brightness)
+        glVertex3f(x, y, z)
+    glEnd()
+
+# =========================
+# MOON BASE & CRATERS
+# =========================
+def init_craters():
+    """Randomly generate crater positions on the moon's sphere,
+    avoiding the player's starting area."""
+    global craters
+    craters = []
+    moon_radius = BASE_RADIUS / 4
+    SAFE_ZONE_RADIUS = 200.0  # Define a safe zone around the origin
+    
+    for _ in range(NUM_CRATERS):
+        # Generate random spherical coordinates for the crater
+        theta = random.uniform(0, 2 * math.pi)
+        phi = random.uniform(0, math.pi)
+        
+        # Calculate the 3D position on the surface of the moon
+        x = moon_radius * math.sin(phi) * math.cos(theta)
+        y = moon_radius * math.sin(phi) * math.sin(theta)
+        z = moon_radius * math.cos(phi)
+
+        # Check if the crater's position is within the safe zone
+        distance_from_origin = math.hypot(x, y)
+        if distance_from_origin < SAFE_ZONE_RADIUS:
+            continue
+        
+        # Store the 3D position and a random radius for the crater
+        r = random.uniform(20, 50)
+        craters.append({'pos': [x, y, z], 'radius': r})
+
+
+def init_stars():
+    """Generate random star positions across a wide 360° area"""
+    global stars
+    stars = []
+    for _ in range(NUM_STARS):
+        theta = random.uniform(0, 2 * math.pi)
+        phi = random.uniform(-math.pi / 2, math.pi / 2)
+
+        radius = random.uniform(1200, 2500)
+        x = radius * math.cos(phi) * math.cos(theta)
+        y = radius * math.cos(phi) * math.sin(theta)
+        z = radius * math.sin(phi)
+
+        stars.append((x, y, z))
+
+def draw_stars():
+    """Render blinking 3D stars as slightly bigger spheres with optional size variation"""
+    glPushMatrix()
+    for i, (x, y, z) in enumerate(stars):
+        radius = 5.0 + (i % 3)
+        blink_speed = 200.0 + (i % 3) * 50
+        brightness = 0.6 + 0.4 * math.sin(glutGet(GLUT_ELAPSED_TIME) / blink_speed + i)
+        glColor3f(brightness, brightness, brightness)
+
+        glPushMatrix()
+        glTranslatef(x, y, z)
+        glutSolidSphere(radius, 8, 8)
+        glPopMatrix()
+    glPopMatrix()
+
+def draw_moon():
+    """Draw a realistic 3D moon sphere with craters as depressions"""
+    glPushMatrix()
+    glColor3f(0.7, 0.7, 0.7)
+    glutSolidSphere(BASE_RADIUS / 4, 60, 60)
+    glPopMatrix()
+    
+    for crater in craters:
+        crater_pos = crater['pos']
+        crater_radius = crater['radius']
+        
+        glPushMatrix()
+        glColor3f(0.4, 0.4, 0.4)
+        
+        glTranslatef(crater_pos[0], crater_pos[1], crater_pos[2])
+        
+        direction_vector = [crater_pos[0], crater_pos[1], crater_pos[2]]
+        
+        angle_xy = math.degrees(math.atan2(direction_vector[1], direction_vector[0]))
+        angle_z = math.degrees(math.atan2(math.sqrt(direction_vector[0]**2 + direction_vector[1]**2), direction_vector[2]))
+        
+        glRotatef(angle_xy, 0, 0, 1)
+        glRotatef(angle_z, 0, 1, 0)
+        
+        glTranslatef(0, 0, -2)
+        glutSolidSphere(crater_radius, 20, 20)
+        glPopMatrix()
+
+# =========================
+# DRAW PLAYER ASTRONAUT
+# =========================
+def draw_gun():
+    """Draw a gun with a cylindrical body and a conical tip."""
+    glPushMatrix()
+    # Position the gun relative to the player's body
+    glTranslatef(2.5, 0.0, 1.0)
+    
+    # Rotate the gun to point along the player's forward direction (Z-axis in local space)
+    glRotatef(90, 1, 0, 0)  # Align cylinder (Y-axis) with local Z-axis (forward)
+    
+    # Draw the gun barrel (Cylinder)
+    glColor3f(0.3, 0.3, 0.3)  # Dark gray color
+    gluCylinder(gluNewQuadric(), 0.3, 0.3, 2.5, 12, 12)  # uniform radius, length
+    
+    # Draw the conical tip at the end of the barrel
+    glPushMatrix()
+    glTranslatef(0.0, 0.0, 2.5)  # Move to the end of the cylinder
+    glColor3f(0.5, 0.5, 0.5)  # Lighter gray for the tip
+    glutSolidCone(0.4, 0.8, 12, 12)  # base radius, height
+    glPopMatrix()
+
+    # Draw the gun handle (Cube or thicker cylinder)
+    glColor3f(0.5, 0.5, 0.5)
+    glPushMatrix()
+    glTranslatef(0.0, 0.0, 0.5)
+    glScalef(0.6, 1.8, 0.6)  # Slightly thicker handle
+    glutSolidCube(1.0)
+    glPopMatrix()
+
+    glPopMatrix()
+
+
+def draw_player():
+    global player_pos, player_angle, is_shielded
+    
+    glPushMatrix()
+    glTranslatef(player_pos[0], player_pos[1], player_pos[2])
+    glRotatef(player_angle, 0, 0, 1)
+
+    # Draw shield if active
+    if is_shielded:
+        glEnable(GL_BLEND)
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
+        glPushMatrix()
+        glColor4f(0.2, 0.8, 1.0, 0.5) # Translucent blue color
+        glutSolidSphere(6.0, 20, 20) # A larger, transparent sphere around the player
+        glPopMatrix()
+        glDisable(GL_BLEND)
+
+    # Main Body (Torso)
+    glColor3f(1.0, 1.0, 1.0)
+    glPushMatrix()
+    glScalef(2.0, 1.6, 3.0)
+    glutSolidCube(1.0)
+    glPopMatrix()
+    
+    # Helmet (Head)
+    glColor3f(1.0, 0.9, 0.6)
+    glPushMatrix()
+    glTranslatef(0, 0, 1.8)
+    glutSolidSphere(1.0, 20, 20)
+    glPopMatrix()
+
+    # Right Arm
+    glColor3f(1.0, 1.0, 1.0)
+    glPushMatrix()
+    glTranslatef(1.3, 0, 0.7)
+    glRotatef(-45, 1, 0, 0)
+    glScalef(0.7, 0.7, 2.0)
+    glutSolidCube(1.0)
+    glPopMatrix()
+
+    # Left Arm
+    glPushMatrix()
+    glTranslatef(-1.3, 0, 0.7)
+    glRotatef(-45, 1, 0, 0)
+    glScalef(0.7, 0.7, 2.0)
+    glutSolidCube(1.0)
+    glPopMatrix()
+
+    # Right Leg
+    glPushMatrix()
+    glTranslatef(0.6, 0, -2.0)
+    glScalef(0.8, 0.8, 2.2)
+    glutSolidCube(1.0)
+    glPopMatrix()
+
+    # Left Leg
+    glPushMatrix()
+    glTranslatef(-0.6, 0, -2.0)
+    glScalef(0.8, 0.8, 2.2)
+    glutSolidCube(1.0)
+    glPopMatrix()
+
+    draw_gun()
+
+    glPopMatrix()
+
+# =========================
+# BULLET FUNCTIONS
+# =========================
+def draw_bullet(bullet_pos):
+    """Draw a single bullet as a small sphere."""
+    glPushMatrix()
+    glColor3f(1.0, 0.0, 0.0)  # Bright red for a small, distinct bullet
+    glTranslatef(bullet_pos[0], bullet_pos[1], bullet_pos[2])
+    glutSolidSphere(BULLET_RADIUS, 8, 8)  # Smaller sphere with fewer segments
+    glPopMatrix()
+
+def fire_bullet():
+    global bullets, last_shot_time
+    now = time.time()
+    if now - last_shot_time < BULLET_COOLDOWN:
+        return
+    
+    # Calculate the forward direction of the player
+    angle_rad = math.radians(player_angle)
+    
+    # These vectors are relative to the camera's Z axis.
+    forward_x = math.cos(angle_rad)
+    forward_y = math.sin(angle_rad)
+    
+    # The gun is at a specific offset from the player's center. We need to account for this.
+    # Player's Z-axis is "up" in this code, so Z represents height.
+    # Gun is drawn at (2.5, 0.0, 1.0) relative to player. We'll simplify for now and fire from the player's position.
+    
+    bullet_start_pos = list(player_pos) # Start the bullet from the player's position
+    bullet_start_pos[0] += forward_x * 5 # Offset slightly in the direction of fire
+    bullet_start_pos[1] += forward_y * 5
+
+    bullets.append({
+        'pos': bullet_start_pos,
+        'direction': [forward_x, forward_y, 0], # Bullet travels in the XY plane for now
+        'spawn_time': time.time()
+    })
+    last_shot_time = now  # Update last shot time for cooldown
+
+def check_collision(pos1, pos2, radius1, radius2):
+    """Check for collision between two spherical objects."""
+    distance = math.sqrt((pos1[0] - pos2[0])**2 + (pos1[1] - pos2[1])**2 + (pos1[2] - pos2[2])**2)
+    return distance < (radius1 + radius2)
+
+
+# =========================
+# ALIEN FUNCTIONS
+# =========================
+
+def draw_alien(alien_pos):
+    glPushMatrix()
+    glTranslatef(alien_pos[0], alien_pos[1], alien_pos[2])
+    
+    # Calculate orientation to face the player
+    target_vector = [player_pos[0] - alien_pos[0], player_pos[1] - alien_pos[1]]
+    angle_rad = math.atan2(target_vector[1], target_vector[0])
+    angle_deg = math.degrees(angle_rad)
+    
+    glRotatef(angle_deg, 0, 0, 1)
+
+    # Body (green cone)
+    glColor3f(0.0, 1.0, 0.0) # Set alien color to bright green
+    glPushMatrix()
+    glRotatef(-90.0, 1.0, 0.0, 0.0) # Rotate to make cone point upwards
+    glutSolidCone(15, 37.5, 20, 20) # base radius, height, slices, stacks
+    glPopMatrix()
+    
+    # Head (black sphere on top)
+    glColor3f(0.0, 0.0, 0.0) # Black color for the head
+    glPushMatrix()
+    glTranslatef(0, 0, 37.5) # Move to the top of the cone
+    glutSolidSphere(11.25, 20, 20) # 50% smaller
+    glPopMatrix()
+
+    glPopMatrix()
+
+def spawn_alien():
+    global aliens, aliens_spawned_count
+    moon_radius = BASE_RADIUS / 4
+    if len(aliens) < MAX_ALIENS and aliens_spawned_count < total_aliens_to_spawn:
+        angle = random.uniform(0, 2 * math.pi)
+        
+        # Spawn aliens far away from the player
+        spawn_dist_xy = random.uniform(moon_radius/2, moon_radius - 20)
+        
+        x = spawn_dist_xy * math.cos(angle)
+        y = spawn_dist_xy * math.sin(angle)
+        
+        dist_from_origin_sq = x**2 + y**2
+        z = math.sqrt(moon_radius**2 - dist_from_origin_sq) + 20.0
+        
+        aliens.append({
+            'pos': [x, y, z],
+            'speed': INITIAL_ALIEN_SPEED + (aliens_spawned_count * ALIEN_SPEED_INCREASE_RATE),
+            'spawn_time': time.time()
+        })
+        aliens_spawned_count += 1
+        print(f"Spawned alien #{aliens_spawned_count} with speed {aliens[-1]['speed']:.2f}")
+
+# =========================
+# COIN FUNCTIONS
+# =========================
+def draw_coin(coin_pos):
+    """Draw a coin as a gold sphere."""
+    glPushMatrix()
+    glColor3f(1.0, 0.84, 0.0)  # Gold/yellow color
+    glTranslatef(coin_pos[0], coin_pos[1], coin_pos[2])
+    glutSolidSphere(5.0, 20, 20)
+    glPopMatrix()
+
+def spawn_coin():
+    global coins
+    if len(coins) < MAX_COINS:
+        angle = random.uniform(0, 2 * math.pi)
+        dist = random.uniform(50, 200)  # Spawn coins close to the player
+        x = player_pos[0] + dist * math.cos(angle)
+        y = player_pos[1] + dist * math.sin(angle)
+        
+        # Calculate z-position on the spherical moon surface
+        moon_radius = BASE_RADIUS / 4
+        dist_from_origin_sq = x**2 + y**2
+        if dist_from_origin_sq > moon_radius**2:
+            dist_from_origin = math.sqrt(dist_from_origin_sq)
+            x = (x / dist_from_origin) * moon_radius
+            y = (y / dist_from_origin) * moon_radius
+            dist_from_origin_sq = x**2 + y**2
+
+        z = math.sqrt(moon_radius**2 - dist_from_origin_sq) + 2.0
+        
+        coins.append({'pos': [x, y, z]})
+        print("Spawned a new coin.")
+
+def check_coin_collision():
+    global player_pos, coins, health, oxygen, collected_coins, collision_message, message_display_time
+    coins_to_remove = []
+    
+    for coin in coins:
+        distance = math.sqrt((player_pos[0] - coin['pos'][0])**2 +
+                             (player_pos[1] - coin['pos'][1])**2 +
+                             (player_pos[2] - coin['pos'][2])**2)
+        
+        if distance < 20: # A reasonable collision radius
+            health = min(100, health + COIN_HEALTH_RESTORE)
+            oxygen = min(100, oxygen + COIN_OXYGEN_RESTORE)
+            collected_coins += 1 # Increment collected coins
+            collision_message = f"Coin collected! Total: {collected_coins}"
+            message_display_time = time.time()
+            coins_to_remove.append(coin)
+            
+    coins[:] = [c for c in coins if c not in coins_to_remove]
+
+# =========================
+# SHIELD FUNCTIONS
+# =========================
+def activate_shield():
+    global is_shielded, shield_start_time
+    if not is_shielded:
+        is_shielded = True
+        shield_start_time = time.time()
+        print("Shield Activated!")
+
+
+# =========================
+# CAMERA SETUP
+# =========================
+def setupCamera():
+    glMatrixMode(GL_PROJECTION)
+    glLoadIdentity()
+    gluPerspective(70, 1.25, 0.1, 3000)
+    glMatrixMode(GL_MODELVIEW)
+    glLoadIdentity()
+
+    # Camera is now stationary and focused on the player
+    cam_x = player_pos[0] + camera_radius * math.cos(math.radians(camera_angle) + math.pi)
+    cam_y = player_pos[1] + camera_radius * math.sin(math.radians(camera_angle) + math.pi)
+    
+    gluLookAt(cam_x, cam_y, player_pos[2] + camera_height, 
+              player_pos[0], player_pos[1], player_pos[2],
+              0, 0, 1)
+
+# =========================
+# HUD DISPLAY (SCORE, HEALTH)
+# =========================
+def draw_text(x, y, text, font=GLUT_BITMAP_HELVETICA_18):
+    glColor3f(1, 1, 1)
+    glMatrixMode(GL_PROJECTION)
+    glPushMatrix()
+    glLoadIdentity()
+    gluOrtho2D(0, 1000, 0, 800)
+    glMatrixMode(GL_MODELVIEW)
+    glPushMatrix()
+    glLoadIdentity()
+    glRasterPos2f(x, y)
+    for ch in text:
+        glutBitmapCharacter(font, ord(ch))
+    glPopMatrix()
+    glMatrixMode(GL_PROJECTION)
+    glPopMatrix()
+    glMatrixMode(GL_MODELVIEW)
+
+# =========================
+# CONTROLS
+# =========================
+def keyboardListener(key, x, y):
+    global player_pos, player_angle, is_paused
+    moon_radius = BASE_RADIUS / 4
+    player_height = 4 
+
+    angle_rad = math.radians(player_angle)
+    
+    forward_x = math.cos(angle_rad)
+    forward_y = math.sin(angle_rad)
+    
+    # Calculate right and left vectors
+    right_x = math.cos(angle_rad - math.pi / 2)
+    right_y = math.sin(angle_rad - math.pi / 2)
+    left_x = math.cos(angle_rad + math.pi / 2)
+    left_y = math.sin(angle_rad + math.pi / 2)
+
+    new_x = player_pos[0]
+    new_y = player_pos[1]
+    
+    if key == b'w':
+        new_x += forward_x * PLAYER_SPEED
+        new_y += forward_y * PLAYER_SPEED
+    elif key == b's':
+        new_x -= forward_x * PLAYER_SPEED
+        new_y -= forward_y * PLAYER_SPEED
+    elif key == b'e':  # Move right
+        new_x += right_x * PLAYER_SPEED
+        new_y += right_y * PLAYER_SPEED
+    elif key == b'f':  # Move left
+        new_x += left_x * PLAYER_SPEED
+        new_y += left_y * PLAYER_SPEED
+    elif key == b'p' or key == b'P':
+        is_paused = not is_paused
+    elif key == b'r' or key == b'R':
+        restart_game()
+    elif key == b'n' or key == b'N':
+        player_angle = (player_angle + 30) % 360 # Use a fixed rotation value, or a fraction of gun_rotation_speed
+    elif key == b'm' or key == b'M':
+        activate_shield()
+    elif key == b'\x1b':
+        glutLeaveMainLoop()
+        return
+
+    if new_x != player_pos[0] or new_y != player_pos[1]:
+        new_dist_xy = math.hypot(new_x, new_y)
+
+        if new_dist_xy < moon_radius - 20:
+            player_pos[0] = new_x
+            player_pos[1] = new_y
+            
+            player_pos[2] = math.sqrt(moon_radius**2 - new_dist_xy**2) + player_height
+        
+    glutPostRedisplay()
+
+def specialKeyListener(key, x, y):
+    global camera_angle, camera_height, camera_radius
+    if key == GLUT_KEY_UP:
+        camera_radius = max(5.0, camera_radius - 20.0)
+        camera_height = max(5.0, camera_height - 5.0)
+    elif key == GLUT_KEY_DOWN:
+        camera_radius = min(1500.0, camera_radius + 20.0)
+        camera_height = min(600.0, camera_height + 5.0)
+    elif key == GLUT_KEY_LEFT:
+        camera_angle = (camera_angle + 5.0) % 360.0
+    elif key == GLUT_KEY_RIGHT:
+        camera_angle = (camera_angle - 5.0) % 360.0
+
+    glutPostRedisplay()
+
+
+# =========================
+# MOUSE HANDLERS
+# =========================
+def mouseListener(button, state, x, y):
+    global is_firing
+    if button == GLUT_RIGHT_BUTTON:
+        if state == GLUT_DOWN:
+            is_firing = True
+        elif state == GLUT_UP:
+            is_firing = False
+
+
+def restart_game():
+    global player_pos, player_angle, aliens, MAX_ALIENS, last_alien_spawn_time, is_paused, bullets, last_tick, score, health, aliens_spawned_count, game_over, oxygen, coins, last_coin_spawn_time, collected_coins, collision_message, message_display_time, is_shielded, shield_start_time
+    
+    player_pos = [0.0, 0.0, BASE_RADIUS / 4 + 15]
+    player_angle = 0.0
+    aliens = []
+    bullets = []
+    coins = []
+    aliens_spawned_count = 0
+    score = 0
+    health = 100 # Reset health
+    oxygen = 100.0 # Reset oxygen on restart
+    collected_coins = 0 # Reset collected coins
+    collision_message = ""
+    message_display_time = 0
+    game_over = False
+    last_alien_spawn_time = time.time()
+    last_coin_spawn_time = time.time()
+    is_paused = False
+    is_shielded = False
+    shield_start_time = 0.0
+    last_tick = time.time()
+    
+    init_craters()
+
+# =========================
+# MAIN DISPLAY FUNCTION
+# =========================
+def showScreen():
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
+    glLoadIdentity()
+    glClearColor(0.0, 0.0, 0.05, 1.0)
+
+    setupCamera()
+    draw_stars()
+    draw_moon()
+    draw_player()
+    
+    for alien in aliens:
+        draw_alien(alien['pos'])
+
+    for bullet in bullets:
+        draw_bullet(bullet['pos'])
+        
+    for coin in coins:
+        draw_coin(coin['pos'])
+
+    draw_text(20, 760, "LUNARIS: The Last Outpost")
+    draw_text(20, 730, f"Score: {score}  Health: {health}")
+    draw_text(20, 700, f"Oxygen: {int(oxygen)}%") # Display oxygen as an integer percentage
+    # Display the number of aliens currently alive
+    draw_text(20, 670, f"Aliens: {len(aliens)} / {total_aliens_to_spawn}") 
+    
+    draw_text(850, 760, "P: Pause")
+    draw_text(850, 730, "R: Restart")
+    draw_text(850, 700, "N: Spin")
+    draw_text(850, 670, "Right-Click: Fire")
+    
+    if is_shielded:
+        remaining_time = max(0, shield_duration - (time.time() - shield_start_time))
+        draw_text(20, 640, f"Shield: {int(remaining_time)}s")
+    
+    if collision_message and time.time() - message_display_time < 3: # Display message for 3 seconds
+        draw_text(20, 640, collision_message)
+
+    if is_paused:
+        draw_text(450, 400, "PAUSED", GLUT_BITMAP_TIMES_ROMAN_24)
+
+    if game_over:
+        draw_text(450, 400, "GAME OVER", GLUT_BITMAP_TIMES_ROMAN_24)
+
+    glutSwapBuffers()
+
+def manage_oxygen(dt):
+    global oxygen, game_over
+    if oxygen > 0:
+        oxygen -= OXYGEN_DECAY_RATE * dt
+        if oxygen <= 0:
+            oxygen = 0
+            game_over = True
+            print("Oxygen depleted! Game Over.")
+
+def idle():
+    global last_alien_spawn_time, aliens, is_paused, bullets, last_tick, is_firing, score, health, game_over, aliens_spawned_count, coins, last_coin_spawn_time, is_shielded, shield_start_time
+    
+    now = time.time()
+    dt = now - last_tick
+    last_tick = now
+
+    if is_paused or game_over:
+        glutPostRedisplay()
+        return
+    
+    current_time = time.time()
+    
+    # Check if shield duration has expired
+    if is_shielded and (now - shield_start_time) > shield_duration:
+        is_shielded = False
+        print("Shield Expired!")
+            
+    # Continuous firing check
+    if is_firing:
+        fire_bullet()
+        
+    # Manage oxygen
+    manage_oxygen(dt)
+
+    # Manage coins
+    if current_time - last_coin_spawn_time > COIN_SPAWN_INTERVAL and len(coins) < MAX_COINS:
+        spawn_coin()
+        last_coin_spawn_time = current_time
+    check_coin_collision()
+
+
+    # Alien Spawning Logic
+    if current_time - last_alien_spawn_time > ALIEN_SPAWN_INTERVAL and len(aliens) < MAX_ALIENS and aliens_spawned_count < total_aliens_to_spawn:
+        spawn_alien()
+        last_alien_spawn_time = current_time
+
+    # Game Logic: Bullet Movement and Collisions
+    bullets_to_remove = []
+    aliens_to_remove = []
+
+    for bullet in bullets:
+        hit = False
+        for alien in aliens:
+            # Check for bullet-alien collision
+            if check_collision(bullet['pos'], alien['pos'], BULLET_RADIUS, ALIEN_COLLISION_RADIUS):
+                aliens_to_remove.append(alien)
+                hit = True
+                score += 10 # Increase score on hit
+                break
+        
+        if hit:
+            bullets_to_remove.append(bullet)
+        elif (current_time - bullet['spawn_time']) > BULLET_LIFETIME:
+            bullets_to_remove.append(bullet)
+        else:
+            bullet['pos'][0] += bullet['direction'][0] * BULLET_SPEED * dt
+            bullet['pos'][1] += bullet['direction'][1] * BULLET_SPEED * dt
+
+    bullets[:] = [b for b in bullets if b not in bullets_to_remove]
+    aliens[:] = [a for a in aliens if a not in aliens_to_remove]
+
+    # Process movement of remaining aliens and check for player collision
+    aliens_to_remove_after_move = []
+    for alien in aliens:
+        
+        dx = player_pos[0] - alien['pos'][0]
+        dy = player_pos[1] - alien['pos'][1]
+        dz = player_pos[2] - alien['pos'][2]
+        
+        dist_to_player = math.sqrt(dx*dx + dy*dy + dz*dz)
+        
+        # Corrected alien movement logic
+        if dist_to_player > 20: # Keep aliens from getting too close
+            dir_x = dx / dist_to_player
+            dir_y = dy / dist_to_player
+            dir_z = dz / dist_to_player
+            
+            alien['pos'][0] += dir_x * alien['speed'] * dt
+            alien['pos'][1] += dir_y * alien['speed'] * dt
+            alien['pos'][2] += dir_z * alien['speed'] * dt
+        else:
+            if not is_shielded:
+                health -= 10 # Decrease health by 10 on each alien hit
+                if health <= 0:
+                    game_over = True
+                print("Alien hit player! Health is now:", health)
+            else:
+                print("Alien hit shielded player! No damage taken.")
+            
+            aliens_to_remove_after_move.append(alien)
+                
+    aliens[:] = [a for a in aliens if a not in aliens_to_remove_after_move]
+
+    glutPostRedisplay()
+
+# =========================
+# MAIN FUNCTION
+# =========================
+def main():
+    glutInit()
+    glutInitDisplayMode(GLUT_DOUBLE | GLUT_RGB | GLUT_DEPTH)
+    glutInitWindowSize(1000, 800)
+    glutInitWindowPosition(50, 50)
+    glutCreateWindow(b"LUNARIS: The Last Outpost")
+    glEnable(GL_DEPTH_TEST)
+    generate_stars(300)
+    init_craters()
+    init_stars()
+    
+    glutDisplayFunc(showScreen)
+    glutKeyboardFunc(keyboardListener)
+    glutSpecialFunc(specialKeyListener)
+    glutMouseFunc(mouseListener)
+    glutIdleFunc(idle)
+    glutMainLoop()
+
+if __name__ == "__main__":
+    main()
