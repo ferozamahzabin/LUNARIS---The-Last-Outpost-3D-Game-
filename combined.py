@@ -33,11 +33,13 @@ max_health = 100.0
 energy = 100.0
 max_energy = 100.0
 hit_count = 0
-MAX_HITS = 10
+MAX_HITS = 3  # New: Player dies after 3 hits
 score = 0
 game_over = False
 oxygen = 100.0
 OXYGEN_DECAY_RATE = 0.5
+missed_shots_count = 0 # New: Counter for missed shots
+MAX_MISSED_SHOTS = 10 # New: Player dies after 10 missed shots
 
 # Camera (third-person orbit & FPV toggle)
 first_person_mode = False
@@ -218,6 +220,7 @@ def draw_hud():
         energy_percent = energy / max_energy if max_energy > 0 else 0
         energy_color = (1.0,1.0,1.0) if energy_percent>0.5 else (1.0,0.6,0.4) if energy_percent>0.2 else (1.0,0.3,0.3)
         draw_text(18, HEIGHT - 88, f"ENERGY:{int(energy)}", rgb=energy_color)
+        draw_text(18, HEIGHT-112, f"MISSED SHOTS: {missed_shots_count}") # New: Missed shots counter
         if umbrella_active:
             draw_text(WIDTH - 240, HEIGHT - 40, "☂ UMBRELLA ACTIVE", rgb=(0.95,0.95,0.2))
     draw_text(WIDTH-120, HEIGHT-40, "Press 'x' to switch level", rgb=(0.9,0.9,0.9), font=GLUT_BITMAP_HELVETICA_12)
@@ -274,7 +277,11 @@ def draw_umbrella():
 def draw_player():
     glPushMatrix()
     glTranslatef(player_pos[0], player_pos[1], player_pos[2])
-    glRotatef(gun_angle, 0, 0, 1)
+    if game_over and game_level == 2:  # New: Player death animation
+        glRotatef(90, 1, 0, 0)
+    else:
+        glRotatef(gun_angle, 0, 0, 1)
+
     if first_person_mode:
         glPushMatrix()
         glTranslatef(TORSO_W * 0.6, 0, TORSO_H * 0.72)
@@ -370,20 +377,30 @@ def fire_bullet():
     bullets.append({'pos':[gun_x, gun_y, gun_z], 'vel':[vx,vy,0.0], 'active':True, 'is_from_player': True})
 
 def update_bullets():
+    global bullets, missed_shots_count, game_over
     for b in bullets[:]:
         b['pos'][0] += b['vel'][0] * (FRAME_DT*60.0)
         b['pos'][1] += b['vel'][1] * (FRAME_DT*60.0)
         if abs(b['pos'][0]) > SURFACE_RADIUS + 800 or abs(b['pos'][1]) > SURFACE_RADIUS + 800:
+            if b['is_from_player']: # New: Check if the bullet missed
+                missed_shots_count += 1
+                if missed_shots_count >= MAX_MISSED_SHOTS:
+                    game_over = True
             try:
                 bullets.remove(b)
             except ValueError:
                 pass
 
 def draw_bullet(b):
+    # New: Draw laser beam instead of bullet
     glPushMatrix()
-    glTranslatef(b['pos'][0], b['pos'][1], b['pos'][2])
-    glColor3f(1.0, 0.6, 0.1)
-    glutSolidSphere(BULLET_SIZE*0.25, 8, 8)
+    glColor3f(0.0, 0.6, 1.0) # Blue laser color
+    glLineWidth(2.5)
+    glBegin(GL_LINES)
+    glVertex3f(b['pos'][0] - b['vel'][0]*0.2, b['pos'][1] - b['vel'][1]*0.2, b['pos'][2] - b['vel'][2]*0.2)
+    glVertex3f(b['pos'][0], b['pos'][1], b['pos'][2])
+    glEnd()
+    glLineWidth(1.0)
     glPopMatrix()
 
 # =========================
@@ -519,9 +536,9 @@ def manage_oxygen(dt):
 # LEVEL 2 LOGIC (METEORS, UMBRELLA)
 # =========================
 def get_storm_parameters(lvl):
-    base_interval = max(0.3, 1.8 - (lvl * 0.15))
-    meteors_per_wave = min(16, 2 + lvl)
-    base_speed = min(28.0, 8.0 + (lvl * 1.5))
+    base_interval = max(0.5, 3.0 - (lvl * 0.2)) # Slower spawn interval
+    meteors_per_wave = min(16, 1 + lvl) # Start with 1, increase with level
+    base_speed = min(15.0, 4.0 + (lvl * 0.5)) # Slower initial speed
     storm_variance = 0.25 + (lvl * 0.04)
     return base_interval, meteors_per_wave, base_speed, storm_variance
 
@@ -635,12 +652,8 @@ def draw_meteors():
         glPopMatrix()
 
 def update_umbrella_energy():
-    global energy, game_over
-    if umbrella_active:
-        energy -= umbrella_energy_cost
-        if energy <= 0:
-            energy = 0
-            game_over = True
+    # Umbrella no longer drains energy as requested.
+    pass
 
 def check_level_progression_L2():
     global level_L2, storm_intensity
@@ -655,7 +668,7 @@ def check_level_progression_L2():
 # GAME MANAGEMENT & CONTROLS
 # =========================
 def restart():
-    global game_level, health, oxygen, score, game_over, aliens, coins, collected_coins, last_alien_spawn_time, aliens_spawned_count_L1, level_L2, hit_count, energy, umbrella_active, meteors, last_spawn_time, storm_intensity
+    global game_level, health, oxygen, score, game_over, aliens, coins, collected_coins, last_alien_spawn_time, aliens_spawned_count_L1, level_L2, hit_count, energy, umbrella_active, meteors, last_spawn_time, storm_intensity, missed_shots_count
     
     # Resetting Level 1 specific variables
     health = 100
@@ -674,6 +687,7 @@ def restart():
     meteors = []
     last_spawn_time = time.time()
     storm_intensity = 1.0
+    missed_shots_count = 0 # New: Reset missed shots counter
     if hasattr(idle, 'next_spawn_interval'):
         delattr(idle, 'next_spawn_interval')
     
@@ -717,6 +731,9 @@ def keyboardListener(key, x, y):
         else:
             game_level = 1
         restart() # Reset the game to the initial state of the new level
+    elif key == b' ': # New: Spacebar special attack
+        if game_level == 2 and not game_over:
+            destroy_nearest_meteor()
     elif key == b'\x1b':
         glutLeaveMainLoop()
         return
@@ -728,6 +745,30 @@ def keyboardListener(key, x, y):
     
     glutPostRedisplay()
 
+def destroy_nearest_meteor():
+    global meteors, score
+    if not meteors:
+        return
+    
+    nearest_meteor = None
+    min_dist_sq = float('inf')
+    
+    px, py, pz = player_pos
+    for meteor in meteors:
+        dx = meteor["x"] - px
+        dy = meteor["y"] - py
+        dz = meteor["z"] - pz
+        dist_sq = dx**2 + dy**2 + dz**2
+        
+        if dist_sq < min_dist_sq:
+            min_dist_sq = dist_sq
+            nearest_meteor = meteor
+            
+    if nearest_meteor:
+        nearest_meteor['is_hit'] = True
+        nearest_meteor['hit_timer'] = 0.0
+        score += 1 # Add score for destroying with special attack
+        
 def specialKeyListener(key, x, y):
     global camera_angle, camera_height, camera_radius, camera_pos
     if key == GLUT_KEY_UP:
