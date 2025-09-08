@@ -1,0 +1,618 @@
+from OpenGL.GL import *
+from OpenGL.GLUT import *
+from OpenGL.GLU import *
+import math, random, time
+
+# =========================
+# Global State
+# =========================
+BASE_RADIUS = 1500  # A larger value for a bigger moon
+player_pos = [0.0, 0.0, BASE_RADIUS / 4 + 4]
+player_angle = 0.0  # Facing direction
+gun_rotation_speed = 120.0 # Degrees per second for 360-degree rotation
+
+PLAYER_SPEED = 5.0
+
+# Camera orbit variables
+camera_angle = 45.0
+camera_height = 200.0
+camera_radius = 600.0
+camera_pos = [camera_radius, 0.0, camera_height]
+
+# Moon base variables
+NUM_CRATERS = 20
+craters = []
+
+# Stars for 3D space sky
+star_positions = []
+blink_state = {}
+NUM_STARS = 400
+stars = []
+
+# Alien Variables
+aliens = []
+MAX_ALIENS = 2  # Starts with a maximum of 2 aliens
+FINAL_MAX_ALIENS = 9  # The final maximum number of aliens
+ALIEN_SPAWN_INTERVAL = 5.0  # Seconds between potential alien spawns
+last_alien_spawn_time = time.time()
+INITIAL_ALIEN_SPEED = 3.0
+ALIEN_SPEED_INCREASE_RATE = 0.1  # Speed increases by this much per second of its life
+ALIEN_SPAWN_HEIGHT = 1000  # How high above the moon surface aliens spawn
+ALIEN_SPAWN_RADIUS_OFFSET = 500  # Max horizontal distance from player to spawn
+ALIEN_DIFFICULTY_INCREASE_TIME = 60  # Increase max aliens every 60 seconds
+
+# Game State Variables
+is_paused = False
+
+# Bullets
+bullets = []
+BULLET_SPEED = 100.0  # Make bullets faster
+BULLET_LIFETIME = 1.5  # Shorter lifetime for faster bullets
+BULLET_RADIUS = 1.0  # Smaller bullet size
+is_firing = False  # Changed to False so player doesn't shoot at start
+last_shot_time = time.time()  # For continuous firing cooldown
+BULLET_COOLDOWN = 0.1  # Faster firing rate for continuous fire
+
+# For idle() function to track elapsed time
+last_tick = time.time()
+
+# =========================
+# STAR GENERATION & DRAWING
+# =========================
+def generate_stars(count=300):
+    """Generate stars in a full 3D spherical sky"""
+    global star_positions, blink_state
+    star_positions = []
+    blink_state = {}
+    for i in range(count):
+        theta = random.uniform(0, 2 * math.pi)
+        phi = random.uniform(0, math.pi)
+        r = random.uniform(1000, 1500)
+        x = r * math.cos(theta) * math.sin(phi)
+        y = r * math.sin(theta) * math.sin(phi)
+        z = r * math.cos(phi)
+        star_positions.append((x, y, z))
+        blink_state[i] = random.random()
+
+def draw_stars():
+    glPointSize(2)
+    glBegin(GL_POINTS)
+    for i, (x, y, z) in enumerate(star_positions):
+        brightness = 0.5 + 0.5 * math.sin(time.time() * 3 + i)
+        glColor3f(brightness, brightness, brightness)
+        glVertex3f(x, y, z)
+    glEnd()
+
+# =========================
+# MOON BASE & CRATERS
+# =========================
+def init_craters():
+    """Randomly generate crater positions on the moon's sphere,
+    avoiding the player's starting area."""
+    global craters
+    craters = []
+    moon_radius = BASE_RADIUS / 4
+    SAFE_ZONE_RADIUS = 200.0  # Define a safe zone around the origin
+    
+    for _ in range(NUM_CRATERS):
+        # Generate random spherical coordinates for the crater
+        theta = random.uniform(0, 2 * math.pi)
+        phi = random.uniform(0, math.pi)
+        
+        # Calculate the 3D position on the surface of the moon
+        x = moon_radius * math.sin(phi) * math.cos(theta)
+        y = moon_radius * math.sin(phi) * math.sin(theta)
+        z = moon_radius * math.cos(phi)
+
+        # Check if the crater's position is within the safe zone
+        distance_from_origin = math.hypot(x, y)
+        if distance_from_origin < SAFE_ZONE_RADIUS:
+            continue
+        
+        # Store the 3D position and a random radius for the crater
+        r = random.uniform(20, 50)
+        craters.append({'pos': [x, y, z], 'radius': r})
+
+
+def init_stars():
+    """Generate random star positions across a wide 360° area"""
+    global stars
+    stars = []
+    for _ in range(NUM_STARS):
+        theta = random.uniform(0, 2 * math.pi)
+        phi = random.uniform(-math.pi / 2, math.pi / 2)
+
+        radius = random.uniform(1200, 2500)
+        x = radius * math.cos(phi) * math.cos(theta)
+        y = radius * math.cos(phi) * math.sin(theta)
+        z = radius * math.sin(phi)
+
+        stars.append((x, y, z))
+
+def draw_stars():
+    """Render blinking 3D stars as slightly bigger spheres with optional size variation"""
+    glPushMatrix()
+    for i, (x, y, z) in enumerate(stars):
+        radius = 5.0 + (i % 3)
+        blink_speed = 200.0 + (i % 3) * 50
+        brightness = 0.6 + 0.4 * math.sin(glutGet(GLUT_ELAPSED_TIME) / blink_speed + i)
+        glColor3f(brightness, brightness, brightness)
+
+        glPushMatrix()
+        glTranslatef(x, y, z)
+        glutSolidSphere(radius, 8, 8)
+        glPopMatrix()
+    glPopMatrix()
+
+def draw_moon():
+    """Draw a realistic 3D moon sphere with craters as depressions"""
+    glPushMatrix()
+    glColor3f(0.7, 0.7, 0.7)
+    glutSolidSphere(BASE_RADIUS / 4, 60, 60)
+    glPopMatrix()
+    
+    for crater in craters:
+        crater_pos = crater['pos']
+        crater_radius = crater['radius']
+        
+        glPushMatrix()
+        glColor3f(0.4, 0.4, 0.4)
+        
+        glTranslatef(crater_pos[0], crater_pos[1], crater_pos[2])
+        
+        direction_vector = [crater_pos[0], crater_pos[1], crater_pos[2]]
+        
+        angle_xy = math.degrees(math.atan2(direction_vector[1], direction_vector[0]))
+        angle_z = math.degrees(math.atan2(math.sqrt(direction_vector[0]**2 + direction_vector[1]**2), direction_vector[2]))
+        
+        glRotatef(angle_xy, 0, 0, 1)
+        glRotatef(angle_z, 0, 1, 0)
+        
+        glTranslatef(0, 0, -2)
+        glutSolidSphere(crater_radius, 20, 20)
+        glPopMatrix()
+
+# =========================
+# DRAW PLAYER ASTRONAUT
+# =========================
+def draw_gun():
+    """Draw a gun with a cylindrical body and a conical tip."""
+    glPushMatrix()
+    # Position the gun relative to the player's body
+    glTranslatef(2.5, 0.0, 1.0)
+    
+    # Rotate the gun to point along the player's forward direction (Z-axis in local space)
+    glRotatef(90, 1, 0, 0)  # Align cylinder (Y-axis) with local Z-axis (forward)
+    
+    # Draw the gun barrel (Cylinder)
+    glColor3f(0.3, 0.3, 0.3)  # Dark gray color
+    gluCylinder(gluNewQuadric(), 0.3, 0.3, 2.5, 12, 12)  # uniform radius, length
+    
+    # Draw the conical tip at the end of the barrel
+    glPushMatrix()
+    glTranslatef(0.0, 0.0, 2.5)  # Move to the end of the cylinder
+    glColor3f(0.5, 0.5, 0.5)  # Lighter gray for the tip
+    glutSolidCone(0.4, 0.8, 12, 12)  # base radius, height
+    glPopMatrix()
+
+    # Draw the gun handle (Cube or thicker cylinder)
+    glColor3f(0.5, 0.5, 0.5)
+    glPushMatrix()
+    glTranslatef(0.0, 0.0, 0.5)
+    glScalef(0.6, 1.8, 0.6)  # Slightly thicker handle
+    glutSolidCube(1.0)
+    glPopMatrix()
+
+    glPopMatrix()
+
+
+def draw_player():
+    global player_pos, player_angle
+    
+    glPushMatrix()
+    glTranslatef(player_pos[0], player_pos[1], player_pos[2])
+    glRotatef(player_angle, 0, 0, 1)
+
+    # Main Body (Torso)
+    glColor3f(1.0, 1.0, 1.0)
+    glPushMatrix()
+    glScalef(2.0, 1.6, 3.0)
+    glutSolidCube(1.0)
+    glPopMatrix()
+    
+    # Helmet (Head)
+    glColor3f(1.0, 0.9, 0.6)
+    glPushMatrix()
+    glTranslatef(0, 0, 1.8)
+    glutSolidSphere(1.0, 20, 20)
+    glPopMatrix()
+
+    # Right Arm
+    glColor3f(1.0, 1.0, 1.0)
+    glPushMatrix()
+    glTranslatef(1.3, 0, 0.7)
+    glRotatef(-45, 1, 0, 0)
+    glScalef(0.7, 0.7, 2.0)
+    glutSolidCube(1.0)
+    glPopMatrix()
+
+    # Left Arm
+    glPushMatrix()
+    glTranslatef(-1.3, 0, 0.7)
+    glRotatef(-45, 1, 0, 0)
+    glScalef(0.7, 0.7, 2.0)
+    glutSolidCube(1.0)
+    glPopMatrix()
+
+    # Right Leg
+    glPushMatrix()
+    glTranslatef(0.6, 0, -2.0)
+    glScalef(0.8, 0.8, 2.2)
+    glutSolidCube(1.0)
+    glPopMatrix()
+
+    # Left Leg
+    glPushMatrix()
+    glTranslatef(-0.6, 0, -2.0)
+    glScalef(0.8, 0.8, 2.2)
+    glutSolidCube(1.0)
+    glPopMatrix()
+
+    draw_gun()
+
+    glPopMatrix()
+
+# =========================
+# BULLET FUNCTIONS
+# =========================
+def draw_bullet(bullet_pos):
+    """Draw a single bullet as a small sphere."""
+    glPushMatrix()
+    glColor3f(1.0, 0.0, 0.0)  # Bright red for a small, distinct bullet
+    glTranslatef(bullet_pos[0], bullet_pos[1], bullet_pos[2])
+    glutSolidSphere(BULLET_RADIUS, 8, 8)  # Smaller sphere with fewer segments
+    glPopMatrix()
+
+def fire_bullet():
+    global bullets, last_shot_time
+    now = time.time()
+    if now - last_shot_time < BULLET_COOLDOWN:
+        return
+    
+    # Calculate the forward direction of the player
+    angle_rad = math.radians(player_angle)
+    forward_x = math.cos(angle_rad)
+    forward_y = math.sin(angle_rad)
+    
+    # Adjust the starting position to be at the tip of the gun (end of cone)
+    # Gun base is at player's right hand (2.5, 0, 1.0) relative to player center.
+    # Barrel length 2.5 + cone height 0.8 = 3.3 total barrel length
+    bullet_start_pos = [
+        player_pos[0] + forward_x * (2.5 + 3.3),  # player_pos[0] + gun_x_offset + barrel_length_adjusted
+        player_pos[1] + forward_y * (2.5 + 3.3),
+        player_pos[2] + 1.0  # Gun's Z-offset relative to player center
+    ]
+
+    bullets.append({
+        'pos': bullet_start_pos,
+        'direction': [forward_x, forward_y, 0],
+        'spawn_time': time.time()
+    })
+    last_shot_time = now  # Update last shot time for cooldown
+
+def check_collision(bullet_pos, alien_pos):
+    """Check for collision between a bullet and an alien."""
+    distance = math.sqrt((bullet_pos[0] - alien_pos[0])**2 +
+                        (bullet_pos[1] - alien_pos[1])**2 +
+                        (bullet_pos[2] - alien_pos[2])**2)
+    collision_distance = BULLET_RADIUS + 10  # 10 is an estimate of the alien's central body size
+    return distance < collision_distance
+
+
+# =========================
+# ALIEN FUNCTIONS
+# =========================
+
+def draw_alien(alien_pos):
+    glPushMatrix()
+    glTranslatef(alien_pos[0], alien_pos[1], alien_pos[2])
+    
+    # Body (inverted cone for upper body/head)
+    glColor3f(0.0, 0.8, 0.0)
+    glPushMatrix()
+    glRotatef(-90.0, 1.0, 0.0, 0.0)
+    glutSolidCone(8, 25, 20, 20)
+    glPopMatrix()
+
+    # Leg 1 (cone)
+    glPushMatrix()
+    glTranslatef(-5, 0, -17)
+    glRotatef(-90.0, 1.0, 0.0, 0.0)
+    glutSolidCone(4, 15, 10, 10)
+    glPopMatrix()
+
+    # Leg 2 (cone)
+    glPushMatrix()
+    glTranslatef(5, 0, -17)
+    glRotatef(-90.0, 1.0, 0.0, 0.0)
+    glutSolidCone(4, 15, 10, 10)
+    glPopMatrix()
+
+    glPopMatrix()
+
+def spawn_alien():
+    global aliens
+    # Only spawn if the current count is less than the max
+    if len(aliens) < MAX_ALIENS:
+        angle = random.uniform(0, 2 * math.pi)
+        dist = random.uniform(BASE_RADIUS/4 + 100, BASE_RADIUS/4 + ALIEN_SPAWN_RADIUS_OFFSET)
+        
+        x = player_pos[0] + dist * math.cos(angle)
+        y = player_pos[1] + dist * math.sin(angle)
+        z = player_pos[2] + ALIEN_SPAWN_HEIGHT
+
+        aliens.append({
+            'pos': [x, y, z],
+            'speed': INITIAL_ALIEN_SPEED,
+            'spawn_time': time.time()
+        })
+
+# =========================
+# CAMERA SETUP
+# =========================
+def setupCamera():
+    glMatrixMode(GL_PROJECTION)
+    glLoadIdentity()
+    gluPerspective(70, 1.25, 0.1, 3000)
+    glMatrixMode(GL_MODELVIEW)
+    glLoadIdentity()
+
+    # Camera is now stationary and focused on the player
+    cam_x = player_pos[0] + camera_radius * math.cos(math.radians(camera_angle) + math.pi)
+    cam_y = player_pos[1] + camera_radius * math.sin(math.radians(camera_angle) + math.pi)
+    
+    gluLookAt(cam_x, cam_y, player_pos[2] + camera_height, 
+              player_pos[0], player_pos[1], player_pos[2],
+              0, 0, 1)
+
+# =========================
+# HUD DISPLAY (SCORE, HEALTH)
+# =========================
+def draw_text(x, y, text, font=GLUT_BITMAP_HELVETICA_18):
+    glColor3f(1, 1, 1)
+    glMatrixMode(GL_PROJECTION)
+    glPushMatrix()
+    glLoadIdentity()
+    gluOrtho2D(0, 1000, 0, 800)
+    glMatrixMode(GL_MODELVIEW)
+    glPushMatrix()
+    glLoadIdentity()
+    glRasterPos2f(x, y)
+    for ch in text:
+        glutBitmapCharacter(font, ord(ch))
+    glPopMatrix()
+    glMatrixMode(GL_PROJECTION)
+    glPopMatrix()
+    glMatrixMode(GL_MODELVIEW)
+
+# =========================
+# CONTROLS
+# =========================
+def keyboardListener(key, x, y):
+    global player_pos, player_angle, is_paused
+    moon_radius = BASE_RADIUS / 4
+    player_height = 4 
+
+    angle_rad = math.radians(player_angle)
+    
+    forward_x = math.cos(angle_rad)
+    forward_y = math.sin(angle_rad)
+
+    new_x = player_pos[0]
+    new_y = player_pos[1]
+    
+    if key == b'w':
+        new_x += forward_x * PLAYER_SPEED
+        new_y += forward_y * PLAYER_SPEED
+    elif key == b's':
+        new_x -= forward_x * PLAYER_SPEED
+        new_y -= forward_y * PLAYER_SPEED
+    elif key == b'p' or key == b'P':
+        is_paused = not is_paused
+    elif key == b'r' or key == b'R':
+        restart_game()
+    elif key == b'n' or key == b'N':
+        player_angle = (player_angle + 10) % 360 # Spin 10 degrees with each key press
+    elif key == b'\x1b':
+        glutLeaveMainLoop()
+        return
+
+    if new_x != player_pos[0] or new_y != player_pos[1]:
+        new_dist_xy = math.hypot(new_x, new_y)
+
+        if new_dist_xy < moon_radius - 20:
+            player_pos[0] = new_x
+            player_pos[1] = new_y
+            
+            player_pos[2] = math.sqrt(moon_radius**2 - new_dist_xy**2) + player_height
+        
+    glutPostRedisplay()
+
+def specialKeyListener(key, x, y):
+    global camera_angle, camera_height, camera_radius
+    if key == GLUT_KEY_UP:
+        camera_radius = max(5.0, camera_radius - 20.0)
+        camera_height = max(5.0, camera_height - 5.0)
+    elif key == GLUT_KEY_DOWN:
+        camera_radius = min(1500.0, camera_radius + 20.0)
+        camera_height = min(600.0, camera_height + 5.0)
+    elif key == GLUT_KEY_LEFT:
+        camera_angle = (camera_angle + 5.0) % 360.0
+    elif key == GLUT_KEY_RIGHT:
+        camera_angle = (camera_angle - 5.0) % 360.0
+
+    glutPostRedisplay()
+
+
+# =========================
+# MOUSE HANDLERS
+# =========================
+def mouseListener(button, state, x, y):
+    global is_firing
+    if button == GLUT_RIGHT_BUTTON:
+        if state == GLUT_DOWN:
+            is_firing = True
+        elif state == GLUT_UP:
+            is_firing = False
+
+
+def restart_game():
+    global player_pos, player_angle, aliens, MAX_ALIENS, last_alien_spawn_time, is_paused, bullets, last_tick
+    
+    player_pos = [0.0, 0.0, BASE_RADIUS / 4 + 15]
+    player_angle = 0.0
+    aliens = []
+    bullets = []
+    MAX_ALIENS = 2
+    last_alien_spawn_time = time.time()
+    is_paused = False
+    last_tick = time.time()
+    
+    init_craters()
+
+# =========================
+# MAIN DISPLAY FUNCTION
+# =========================
+def showScreen():
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
+    glLoadIdentity()
+    glClearColor(0.0, 0.0, 0.05, 1.0)
+
+    setupCamera()
+    draw_stars()
+    draw_moon()
+    draw_player()
+    
+    for alien in aliens:
+        draw_alien(alien['pos'])
+
+    for bullet in bullets:
+        draw_bullet(bullet['pos'])
+
+    draw_text(20, 760, "LUNARIS: The Last Outpost")
+    draw_text(20, 730, "Score: 0   Health: 100")
+    draw_text(20, 700, f"Aliens: {len(aliens)} / {MAX_ALIENS}")
+    
+    draw_text(850, 760, "P: Pause")
+    draw_text(850, 730, "R: Restart")
+    draw_text(850, 700, "N: Spin")
+    draw_text(850, 670, "Right-Click: Fire")
+
+
+    if is_paused:
+        draw_text(450, 400, "PAUSED", GLUT_BITMAP_TIMES_ROMAN_24)
+
+    glutSwapBuffers()
+
+def idle():
+    global last_alien_spawn_time, aliens, MAX_ALIENS, is_paused, bullets, last_tick, is_firing
+    
+    now = time.time()
+    dt = now - last_tick
+    last_tick = now
+
+    if is_paused:
+        glutPostRedisplay()
+        return
+    
+    current_time = time.time()
+    elapsed_time = glutGet(GLUT_ELAPSED_TIME) / 1000.0
+            
+    # Continuous firing check
+    if is_firing:  # Fire continuously as long as the button is held
+        fire_bullet()
+
+    # Difficulty Increase
+    if int(elapsed_time) % ALIEN_DIFFICULTY_INCREASE_TIME == 0 and elapsed_time > 1 and int(elapsed_time) > 0 and glutGet(GLUT_ELAPSED_TIME) % 1000 < 200 and MAX_ALIENS < FINAL_MAX_ALIENS:
+        MAX_ALIENS = min(MAX_ALIENS + 1, FINAL_MAX_ALIENS)
+
+    # Alien Spawning Logic
+    if current_time - last_alien_spawn_time > ALIEN_SPAWN_INTERVAL and len(aliens) < MAX_ALIENS:
+        spawn_alien()
+        last_alien_spawn_time = current_time
+
+    # Game Logic: Bullet Movement and Collisions
+    bullets_to_remove = []
+    aliens_to_remove = []
+
+    for bullet in bullets:
+        hit = False
+        for alien in aliens:
+            if check_collision(bullet['pos'], alien['pos']):
+                aliens_to_remove.append(alien)
+                hit = True
+                break # Bullet can only hit one alien at a time
+        
+        if hit:
+            bullets_to_remove.append(bullet)
+        elif (current_time - bullet['spawn_time']) > BULLET_LIFETIME:
+            bullets_to_remove.append(bullet)
+        else:
+            bullet['pos'][0] += bullet['direction'][0] * BULLET_SPEED * dt
+            bullet['pos'][1] += bullet['direction'][1] * BULLET_SPEED * dt
+
+    bullets[:] = [b for b in bullets if b not in bullets_to_remove]
+    aliens[:] = [a for a in aliens if a not in aliens_to_remove]
+
+    # Process movement of remaining aliens
+    aliens_to_remove_after_move = []
+    for alien in aliens:
+        alien_elapsed_time = current_time - alien['spawn_time']
+        current_alien_speed = INITIAL_ALIEN_SPEED + (alien_elapsed_time * ALIEN_SPEED_INCREASE_RATE)
+        
+        dx = player_pos[0] - alien['pos'][0]
+        dy = player_pos[1] - alien['pos'][1]
+        dz = player_pos[2] - alien['pos'][2]
+        
+        dist_to_player = math.sqrt(dx*dx + dy*dy + dz*dz)
+        
+        # Corrected alien movement logic
+        if dist_to_player > 10:
+            dir_x = dx / dist_to_player
+            dir_y = dy / dist_to_player
+            dir_z = dz / dist_to_player
+            
+            alien['pos'][0] += dir_x * current_alien_speed * dt
+            alien['pos'][1] += dir_y * current_alien_speed * dt
+            alien['pos'][2] += dir_z * current_alien_speed * dt
+        else:
+            aliens_to_remove_after_move.append(alien)
+            # Handle alien reaching player (e.g., reduce health, despawn alien)
+            
+    aliens[:] = [a for a in aliens if a not in aliens_to_remove_after_move]
+
+    glutPostRedisplay()
+
+# =========================
+# MAIN FUNCTION
+# =========================
+def main():
+    glutInit()
+    glutInitDisplayMode(GLUT_DOUBLE | GLUT_RGB | GLUT_DEPTH)
+    glutInitWindowSize(1000, 800)
+    glutInitWindowPosition(50, 50)
+    glutCreateWindow(b"LUNARIS: The Last Outpost")
+    glEnable(GL_DEPTH_TEST)
+    generate_stars(300)
+    init_craters()
+    init_stars()
+    
+    glutDisplayFunc(showScreen)
+    glutKeyboardFunc(keyboardListener)
+    glutSpecialFunc(specialKeyListener)
+    glutMouseFunc(mouseListener)
+    glutIdleFunc(idle)
+    glutMainLoop()
+
+if __name__ == "__main__":
+    main()
