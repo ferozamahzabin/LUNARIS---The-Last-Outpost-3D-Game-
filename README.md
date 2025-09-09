@@ -1,47 +1,64 @@
-🌑 LUNARIS: The Last Outpost
+Features
+Student 1: Rehnuma Iffat
+ Alien Shooter Features
+Moon and space sky design
+Sphere and blinking stars
+craters
 
-The year is 3025. You are an astronaut stranded on the hostile moon Erevos after a mission goes wrong. Beneath its icy surface, alien species awaken and launch relentless attacks. With oxygen running out, a failing outpost, and scarce resources, survival becomes the ultimate challenge.
+Basic alien enemies that attacks the player **
+Player body alien body 
+Kill enemy
+Bullet and shooting 
+Points
+Alien number 
+Player health
+Difficulty with time
+Oxygen level decreases
+Alien speed increases
+Collecting coin and coin numbers
+Player shield 
+HUD
 
-The environment itself is unforgiving: meteor storms strike without warning, energy depletes over time, and the lunar terrain offers no mercy. Every moment is a test of endurance as you balance defending your base, collecting resources, and staying alive.
+Student 2: Feroza Mahzabin
+ Meteor Shooter Features
+Environment & Visuals
+ 1.1. Moon surface with randomly generated craters
+ 1.2. Blinking stars in the sky (dynamic brightness)
+ 1.3. 3D player model (head, torso, arms, legs, gun)
+ 1.4. Umbrella dome + stick for defense
 
-LUNARIS: The Last Outpost is built entirely with OpenGL for a computer graphics project. It combines survival mechanics, basic combat, and environmental hazards into a visually immersive lunar experience. The core challenge: can you outlast the invasion while uncovering the secrets of past missions?
 
-🎮 Features
+Player Mechanics
+ 2.1. Movement with W, A, S, D keys
+ 2.2. Shooting meteors using Spacebar
+ 2.3. Toggle umbrella shield with U
+ 2.4. Restart game using Enter
 
-Oxygen and energy bar that decrease over time
 
-On-screen display for health, oxygen, and supplies
+Gameplay & Challenges
+ 3.1. Meteors spawn in random storms
+ 3.2. Bullets destroy meteors on collision
+ 3.3. Meteors hitting player reduce health and score
+ 3.4. Umbrella blocks meteors above the player
+ 3.5. Scoring system: +1 per meteor destroyed, -8 when hit
+ 3.6. Energy system:
+ - Shooting & umbrella drain energy
+ - Destroying meteors restores energy
 
-Logs or messages that reveal parts of the story
 
-Multiple player characters, each with unique purposes
+HUD (Heads-Up Display)
+ 4.1. Score display (formatted as 0000+)
+ 4.2. Level indicator (progression system)
+ 4.3. Lives counter (max 3 hits)
+ 4.4. Energy meter with color feedback (white → orange → red)
+ 4.5. Missed shots counter
+ 4.6. Umbrella status text when active
+ 4.7. Targeting reticle at screen center
 
-Unique character designs
 
-Basic alien enemies that move toward the player
-
-Shooting mechanic to defend against aliens
-
-Endless survival mode with increasing difficulty
-
-Game levels with different enemy types and difficulty
-
-Resource collection for upgrades or repairs
-
-Simple base that can be repaired or upgraded
-
-Meteor storms that randomly occur as obstacles
-
-Obstacle avoidance system
-
-Environmental hazards simulating harsh lunar conditions
-
-All controls primarily using mouse input
-
-🛠️ Tech Stack
-
-Graphics Library: OpenGL (GL, GLU, GLUT)
-
-Language: Python (with PyOpenGL)
-
-Rendering: 3D scene with basic shapes, transformations, and event handling
+Progression & Game Over
+ 5.1. Levels increase difficulty with faster/more meteors
+ 5.2. Storm intensity scales with levels
+ 5.3. Game ends when:
+ - Player health/energy reaches 0
+ - Too many hits (≥3)
