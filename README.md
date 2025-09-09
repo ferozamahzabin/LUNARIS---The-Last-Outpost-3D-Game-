@@ -1,9 +1,12 @@
+Summary
+The year is 3025. You are an astronaut stranded on the hostile moon Erevos after your mission goes wrong. Beneath the icy surface, alien species awaken and launch relentless attacks. With limited resources and a failing outpost, you must survive, defend yourself, and uncover the secrets of past missions. The challenge is not only alien threats but also the harsh lunar environment. The ultimate question is simple: can you outlast the invasion?
 Features
 Student 1: Rehnuma Iffat
  Alien Shooter Features
 Moon and space sky design
 Sphere and blinking stars
 craters
+
 
 Basic alien enemies that attacks the player **
 Player body alien body 
